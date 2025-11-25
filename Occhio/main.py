@@ -1,433 +1,462 @@
 """
-Occhio - Sistema de Visão Computacional
-Este módulo é o ponto de entrada principal do sistema, responsável por:
-- Inicialização da câmera
-- Processamento de frames
-- Detecção de objetos e faces
-- Geração de descrições
-- Interface com o usuário
+Occhio - Sistema de Visão Computacional para Deficientes Visuais
+VERSÃO BACKEND/CLOUD - Remove interface visual, adiciona endpoints API
 """
 
 import cv2
-import argparse
 import logging
 import time
-from datetime import datetime
 import os
-from Detectors.yolo_detector import YOLODetector
-from Detectors.face_detector import FaceDetector
-from Utils.gerador import GeradorDescricao
-from db.database import conectar_db, carregar_encodings_existentes, salvar_rosto
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from Report.pdf_report import PDFReport
 import numpy as np
-import requests
-from io import BytesIO
+import threading
+import face_recognition
+import pickle
+import traceback
+import base64
+import io
 from PIL import Image
 
-# Configuração de logging
+# Flask
+from flask import Flask, request, jsonify
+
+# Utils
+from Detectors.yolo_detector import YOLODetector
+from Detectors.face_detector import FaceDetector
+from db.database import DatabaseManager
+from Utils.interpreter import Interpreter
+
+# ================== CONFIGURAÇÃO DE LOG ==================
 logging.basicConfig(
-    level=logging.INFO,  # Aumentando nível de log para debug
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('occhio_cloud.log', mode='a', encoding='utf-8')
+    ]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("Occhio-Cloud")
 
-class ESPCamera:
-    def __init__(self, url):
-        self.url = url
-        self.session = requests.Session()
-        self.stream = None
-        
-    def read(self):
+app = Flask(__name__)
+
+class OcchioCloud:
+    """Classe principal do sistema de visão computacional para cloud"""
+
+    def __init__(self, api_key=None):
         try:
-            response = self.session.get(self.url, stream=True, timeout=5)
-            if response.status_code == 200:
-                # Log do tipo de conteúdo recebido
-                content_type = response.headers.get('Content-Type', '')
-                logger.info(f"Content-Type recebido: {content_type}")
-                
-                # Tenta diferentes métodos de decodificação
-                try:
-                    # Método 1: Diretamente com PIL
-                    img = Image.open(BytesIO(response.content))
-                    frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-                    return True, frame
-                except Exception as e1:
-                    logger.warning(f"Falha método 1: {e1}")
-                    try:
-                        # Método 2: Usando numpy diretamente
-                        nparr = np.frombuffer(response.content, np.uint8)
-                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                        if frame is not None:
-                            return True, frame
-                    except Exception as e2:
-                        logger.warning(f"Falha método 2: {e2}")
-                        try:
-                            # Método 3: Salvando temporariamente
-                            temp_path = "temp_frame.jpg"
-                            with open(temp_path, 'wb') as f:
-                                f.write(response.content)
-                            frame = cv2.imread(temp_path)
-                            if frame is not None:
-                                return True, frame
-                        except Exception as e3:
-                            logger.warning(f"Falha método 3: {e3}")
-                            
-                logger.error("Todos os métodos de decodificação falharam")
-                return False, None
-            else:
-                logger.error(f"Status code inválido: {response.status_code}")
-                return False, None
-        except Exception as e:
-            logger.error(f"Erro ao ler frame da câmera ESP: {e}")
-            return False, None
+            logger.info("🚀 Iniciando Occhio Cloud Backend")
+            self.api_key = api_key
             
-    def isOpened(self):
-        try:
-            response = self.session.get(self.url, timeout=5)
-            if response.status_code == 200:
-                content_type = response.headers.get('Content-Type', '')
-                logger.info(f"Conexão estabelecida. Content-Type: {content_type}")
-                return True
-            logger.error(f"Status code inválido: {response.status_code}")
-            return False
-        except Exception as e:
-            logger.error(f"Erro ao verificar conexão: {e}")
-            return False
+            # === DETECÇÕES ===
+            self.face_names_atual = []
+            self.objetos_atual = []
+            self.contagem_acumulada = {}
             
-    def release(self):
-        if self.session:
-            self.session.close()
-
-class Occhio:
-    def __init__(self, source=0, width=640, height=480):  # Aumentando resolução para melhor detecção
-        """
-        Inicializa o sistema Occhio.
-        
-        Args:
-            source (int/str): Fonte de vídeo (0 para webcam local, URL para câmera IP)
-            width (int): Largura do frame
-            height (int): Altura do frame
-        """
-        self.source = source
-        self.width = width
-        self.height = height
-        self.cap = None
-        self.detector_objetos = YOLODetector()
-        self.detector_faces = FaceDetector()
-        self.gerador = GeradorDescricao()
-        self.ultima_descricao = ""
-        self.ultima_descricao_time = 0
-        self.descricao_interval = 5
-        self.ultimo_frame_time = 0
-        self.frame_interval = 1/30
-        self.ultimo_frame = None
-        self.ultima_detecao = None
-        self.ultima_detecao_time = 0
-        self.detecao_interval = 0.5  # Reduzindo intervalo entre detecções
-        self.ultimo_salvamento = 0
-        self.salvamento_interval = 1
-        self.rostos_salvos = set()  # IDs dos rostos já salvos
-        self.encodings_salvos = []  # Lista de encodings já salvos
-        self.c = None
-        self.y_position = 750
-        self.pdf_report = None
-        self.setup_database()
-        self.setup_pdf()
-        self.setup_diretorios()
-
-    def setup_diretorios(self):
-        """Cria diretórios necessários para salvamento"""
-        try:
-            os.makedirs("rostos", exist_ok=True)
-            os.makedirs("relatorios", exist_ok=True)
-            logger.info("Diretórios criados com sucesso")
-        except Exception as e:
-            logger.error(f"Erro ao criar diretórios: {e}")
-
-    def setup_database(self):
-        """Configura a conexão com o banco de dados e carrega encodings existentes"""
-        try:
-            self.conn, self.cursor = conectar_db()
-            if self.conn and self.cursor:
-                # Carrega encodings existentes do banco
-                encodings, nomes = carregar_encodings_existentes(self.cursor)
-                self.encodings_salvos = encodings  # Inicializa com encodings do banco
-                logger.info(f"Carregados {len(encodings)} encodings do banco de dados")
-        except Exception as e:
-            logger.error(f"Erro ao configurar banco de dados: {e}")
-            self.conn = None
-            self.cursor = None
-            self.encodings_salvos = []
-
-    def setup_pdf(self):
-        """Configura o arquivo PDF para relatórios"""
-        try:
-            self.pdf_report = PDFReport()
-            logger.info("PDF configurado com sucesso")
-        except Exception as e:
-            logger.error(f"Erro ao configurar PDF: {e}")
-            self.pdf_report = None
-
-    def process_frame(self, frame):
-        """Processa um frame da câmera"""
-        try:
-            # Detecta objetos
-            frame, contagem_objetos, objetos_detectados = self.detector_objetos.detectar_objetos(frame)
+            # Inicializar componentes
+            logger.info("🔧 Inicializando detectores...")
             
-            # Detecta faces
-            frame, contagem_faces, faces_detectadas = self.detector_faces.detectar_faces(frame)
-            
-            # Converte contagens para inteiros se necessário
-            contagem_objetos = int(contagem_objetos) if isinstance(contagem_objetos, (int, float)) else 0
-            contagem_faces = int(contagem_faces) if isinstance(contagem_faces, (int, float)) else 0
-            
-            # Atualiza o PDF com o resumo das detecções
-            if self.pdf_report and (contagem_objetos > 0 or contagem_faces > 0):
-                try:
-                    self.pdf_report.add_detection_summary(objetos_detectados, faces_detectadas)
-                except Exception as e:
-                    logger.error(f"Erro ao adicionar resumo ao PDF: {e}")
-            
-            return frame, contagem_objetos, contagem_faces
-            
-        except Exception as e:
-            logger.error(f"Erro ao processar frame: {e}")
-            return frame, 0, 0
-
-    def gerar_descricao(self, detecao):
-        """
-        Gera uma descrição textual baseada nas detecções atuais.
-        
-        Args:
-            detecao: Dicionário contendo informações de detecção
-            
-        Returns:
-            String com a descrição gerada
-        """
-        current_time = time.time()
-        
-        # Verifica se é hora de gerar nova descrição
-        if (current_time - self.ultima_descricao_time < self.descricao_interval and 
-            self.ultima_descricao):
-            return self.ultima_descricao
-            
-        try:
-            descricao = self.gerador.gerar_descricao(detecao)
-            self.ultima_descricao = descricao
-            self.ultima_descricao_time = current_time
-            return descricao
-            
-        except Exception as e:
-            logger.error(f"Erro ao gerar descrição: {e}")
-            return ""
-
-    def _e_distancia(self, encoding1, encoding2):
-        """Calcula a distância euclidiana entre dois encodings"""
-        return np.linalg.norm(encoding1 - encoding2)
-
-    def _e_rosto_ja_salvo(self, novo_encoding):
-        """Verifica se o rosto já foi salvo comparando com encodings existentes"""
-        if not self.encodings_salvos:
-            return False
-            
-        for encoding_salvo in self.encodings_salvos:
+            # YOLO
             try:
-                distancia = self._e_distancia(novo_encoding, encoding_salvo)
-                if distancia < 0.6:  # Limiar de similaridade
-                    logger.info(f"Rosto similar encontrado (distância: {distancia:.2f})")
-                    return True
+                self.detector_objetos = YOLODetector()
+                logger.info("✅ YOLO inicializado com sucesso")
             except Exception as e:
-                logger.warning(f"Erro ao comparar encodings: {e}")
-                continue
-        return False
+                logger.error(f"❌ Erro YOLO: {e}")
+                self.detector_objetos = None
+                
+            # Face Detector
+            try:
+                self.detector_faces = FaceDetector()
+                logger.info("✅ Face detector inicializado com sucesso")
+            except Exception as e:
+                logger.error(f"❌ Erro Face Detector: {e}")
+                self.detector_faces = None
 
-    def salvar_rosto_detectado(self, frame, face_location, face_encoding):
-        current_time = time.time()
-        
-        if current_time - self.ultimo_salvamento < self.salvamento_interval:
-            return
+            # Banco de dados
+            try:
+                self.db = DatabaseManager()
+                self.carregar_faces_do_banco()
+                logger.info("✅ Banco inicializado com sucesso")
+            except Exception as e:
+                logger.error(f"❌ Erro Banco: {e}")
+                self.db = None
+
+            # Interpreter
+            try:
+                self.interpreter = Interpreter(api_key=api_key)
+                logger.info("✅ Interpreter OK")
+            except Exception as e:
+                logger.error(f"❌ Erro Interpreter: {e}")
+                self.interpreter = None
+
+            logger.info("🎉 Occhio Cloud inicializado com sucesso!")
             
-        try:
-            # Extrai coordenadas do rosto
-            if isinstance(face_location, tuple) and len(face_location) == 4:
-                top, right, bottom, left = face_location
-            else:
-                logger.error("Formato inválido de face_location")
-                return
-                
-            # Verifica se o rosto já foi salvo comparando encodings
-            if self._e_rosto_ja_salvo(face_encoding):
-                logger.info("Rosto já existe no banco de dados (encoding similar encontrado)")
-                return
-                
-            # Gera um ID único baseado no timestamp
-            face_id = f"{int(current_time)}"
-            
-            # Cria diretório se não existir
-            os.makedirs("rostos", exist_ok=True)
-            
-            # Salva imagem do rosto
-            face_img = frame[top:bottom, left:right]
-            face_img = cv2.resize(face_img, (160, 160))  # Redimensiona para tamanho padrão
-            face_path = f"rostos/rosto_{face_id}.jpg"
-            cv2.imwrite(face_path, face_img)
-            
-            if self.conn and self.cursor and self.pdf_report:
-                # Salva no banco de dados
-                nome_rosto = f"Rosto_{face_id}"
-                if salvar_rosto(face_id, face_encoding, nome_rosto, self.cursor, self.conn):
-                    # Adiciona ao PDF
-                    self.pdf_report.add_face(face_path, face_id, face_location)
-                    
-                    # Adiciona aos conjuntos de rostos salvos
-                    self.rostos_salvos.add(face_id)
-                    self.encodings_salvos.append(face_encoding)
-                    self.ultimo_salvamento = current_time
-                    logger.info(f"Rosto salvo com sucesso: {face_id}")
-                else:
-                    logger.error(f"Falha ao salvar rosto {face_id} no banco de dados")
-                    
         except Exception as e:
-            logger.error(f"Erro ao salvar rosto: {e}")
+            logger.error(f"💥 ERRO CRÍTICO NA INICIALIZAÇÃO: {e}")
+            logger.error(f"📋 Traceback: {traceback.format_exc()}")
+            raise
 
-    def run(self):
-        """Loop principal do sistema"""
-        self.cap = self.create_capture()
-        if not self.cap:
-            logger.error("Não foi possível inicializar a câmera")
-            return
-            
+    def carregar_faces_do_banco(self):
+        """Carrega faces do banco com validação melhorada"""
         try:
-            while True:
-                ret, frame = self.cap.read()
-                if not ret:
-                    logger.warning("Frame vazio recebido")
-                    continue
-
-                # Processa o frame
-                frame, contagem_objetos, contagem_faces = self.process_frame(frame)
-                
-                # Gera e exibe descrição
-                descricao = self.gerar_descricao({
-                    "objetos": contagem_objetos,
-                    "faces": contagem_faces
-                })
-                
-                if descricao:
-                    cv2.putText(frame, descricao, (10, 30),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                
-                # Exibe o frame
-                cv2.imshow('Occhio', frame)
-                
-                # Verifica comandos do usuário
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    break
-                elif key == ord('s'):
-                    # Salva rosto quando tecla 's' é pressionada
-                    if contagem_faces > 0 and hasattr(self.detector_faces, 'face_encodings'):
-                        for face_location, face_encoding in self.detector_faces.face_encodings:
-                            self.salvar_rosto_detectado(frame, face_location, face_encoding)
-                
-        except Exception as e:
-            logger.error(f"Erro durante execução: {e}")
+            logger.info("📂 Carregando faces do banco...")
             
-        finally:
-            self.cleanup()
-
-    def cleanup(self):
-        """Libera recursos e finaliza o sistema"""
-        if self.cap:
-            self.cap.release()
-        cv2.destroyAllWindows()
-        if self.conn:
-            self.conn.close()
-        if self.pdf_report:
-            self.pdf_report.save()
-        logger.info("Sistema finalizado")
-
-    def create_capture(self):
-        """
-        Inicializa a captura de vídeo.
-        Tenta diferentes métodos para garantir compatibilidade com diferentes câmeras.
-        """
-        try:
-            # Se source for uma URL (não um número)
-            if isinstance(self.source, str) and not self.source.isdigit():
-                # Remove http:// se existir para evitar duplicação
-                base_url = self.source.replace('http://', '')
+            if not self.db or not self.detector_faces:
+                logger.error("❌ Banco ou detector não inicializado")
+                return
+            
+            conn = self.db.conn
+            cursor = conn.cursor()
+            cursor.execute("SELECT imgVetor, imgNome FROM user_rec_facial")
+            resultados = cursor.fetchall()
+            
+            known_face_encodings = []
+            known_face_names = []
+            
+            logger.info(f"📊 Encontrados {len(resultados)} registros no banco")
+            
+            for encoding_data, nome in resultados:
+                nome_str = str(nome).strip()
                 
-                # Tenta diferentes formatos de URL comuns para câmeras ESP
-                urls = [
-                    f"http://{base_url}",  # URL original
-                    f"http://{base_url}/capture",  # Adiciona /capture
-                    f"http://{base_url}/snapshot",  # Adiciona /snapshot
-                    f"http://{base_url}/jpg",  # Adiciona /jpg
-                    f"http://{base_url}/stream",  # Adiciona /stream
-                    f"http://{base_url}/cam.jpg",  # Adiciona /cam.jpg
-                ]
-                
-                for url in urls:
+                if (encoding_data and nome_str and 
+                    nome_str.lower() not in ['desconhecido', 'unknown', '']):
+                    
                     try:
-                        logger.info(f"Tentando conectar com: {url}")
-                        cap = ESPCamera(url)
-                        if cap.isOpened():
-                            # Tenta ler um frame para confirmar que está funcionando
-                            ret, frame = cap.read()
-                            if ret and frame is not None:
-                                logger.info(f"Câmera inicializada com sucesso: {url}")
-                                return cap
-                            else:
-                                logger.warning(f"Conexão estabelecida mas não foi possível ler frames de {url}")
-                                cap.release()
+                        if isinstance(encoding_data, (bytes, bytearray)):
+                            encoding_list = pickle.loads(encoding_data)
+                        
+                        if encoding_list and isinstance(encoding_list, list):
+                            encoding_array = np.array(encoding_list)
+                            if encoding_array.shape == (128,):
+                                valido, mensagem = self.detector_faces.verificar_encoding_qualidade(encoding_array)
+                                if valido:
+                                    known_face_encodings.append(encoding_array)
+                                    known_face_names.append(nome_str)
+                                    logger.info(f"✅ Encoding carregado: '{nome_str}' - {mensagem}")
+                                else:
+                                    logger.warning(f"⚠️ Encoding ignorado ('{nome_str}'): {mensagem}")
+                        
                     except Exception as e:
-                        logger.warning(f"Falha ao conectar com {url}: {e}")
-                        continue
-                
-                raise Exception("Não foi possível conectar com nenhum formato de URL. Verifique se:\n"
-                              "1. A câmera está ligada e na mesma rede\n"
-                              "2. O IP está correto\n"
-                              "3. A câmera está transmitindo em um formato compatível")
+                        logger.error(f"❌ Erro ao carregar encoding ('{nome_str}'): {e}")
+            
+            cursor.close()
+            
+            if known_face_encodings:
+                self.detector_faces.carregar_encodings(known_face_encodings, known_face_names)
+                nomes_unicos = list(set(known_face_names))
+                logger.info(f"🎉 {len(known_face_encodings)} encodings válidos carregados")
+                logger.info(f"📝 Pessoas cadastradas: {nomes_unicos}")
             else:
-                # Para webcam local
-                cap = cv2.VideoCapture(self.source)
-                if not cap.isOpened():
-                    raise Exception("Não foi possível abrir a câmera")
+                logger.warning("⚠️ Nenhum encoding válido encontrado no banco")
                 
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                cap.set(cv2.CAP_PROP_FPS, 30)
-                
-                logger.info(f"Câmera inicializada com sucesso: {self.source}")
-                return cap
+        except Exception as e:
+            logger.error(f"❌ Erro ao carregar faces do banco: {e}")
+
+    def _decode_image(self, image_data):
+        """Decodifica imagem de base64 ou bytes para numpy array"""
+        try:
+            if isinstance(image_data, str):
+                # Se for base64
+                if image_data.startswith('data:image'):
+                    # Remover header data:image/...;base64,
+                    image_data = image_data.split(',')[1]
+                image_data = base64.b64decode(image_data)
+            
+            if isinstance(image_data, bytes):
+                # Converter bytes para numpy array
+                nparr = np.frombuffer(image_data, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            else:
+                frame = image_data
+            
+            if frame is None:
+                raise ValueError("Não foi possível decodificar a imagem")
+            
+            return frame
             
         except Exception as e:
-            logger.error(f"Erro ao inicializar câmera: {e}")
-            return None
+            logger.error(f"❌ Erro ao decodificar imagem: {e}")
+            raise
 
-def main():
-    """Função principal que configura e inicia o sistema"""
-    parser = argparse.ArgumentParser(description='Sistema de Visão Computacional Occhio')
-    parser.add_argument('--source', type=str, default="0",
-                      help='Fonte de vídeo (0 para webcam, URL para câmera IP/ESP)')
-    parser.add_argument('--width', type=int, default=640,
-                      help='Largura do frame (VGA = 640)')
-    parser.add_argument('--height', type=int, default=480,
-                      help='Altura do frame (VGA = 480)')
+    def processar_imagem(self, image_data):
+        """
+        Processa imagem e retorna detecções
+        """
+        try:
+            frame = self._decode_image(image_data)
+            
+            # Processar detecções
+            deteccoes = self._processar_deteccoes(frame)
+            
+            return {
+                "success": True,
+                "deteccoes": deteccoes,
+                "timestamp": time.time()
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao processar imagem: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": time.time()
+            }
+
+    def _processar_deteccoes(self, frame):
+        """
+        Processa todas as detecções no frame
+        """
+        deteccoes = {
+            "faces": [],
+            "objetos": [],
+            "contagem_objetos": {},
+            "estatisticas": {}
+        }
+        
+        # Detecção de Faces
+        if self.detector_faces:
+            try:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                
+                face_names = []
+                for face_encoding in face_encodings:
+                    name = "Desconhecido"
+                    confidence = 0.0
+                    
+                    if self.detector_faces.known_face_encodings:
+                        face_distances = face_recognition.face_distance(
+                            self.detector_faces.known_face_encodings, 
+                            face_encoding
+                        )
+                        
+                        best_match_index = np.argmin(face_distances)
+                        best_distance = face_distances[best_match_index]
+                        confidence = max(0, 1 - best_distance)
+                        
+                        if best_distance <= self.detector_faces.tolerance and confidence >= self.detector_faces.min_confidence:
+                            name = self.detector_faces.known_face_names[best_match_index]
+                    
+                    face_names.append({
+                        "nome": name,
+                        "confianca": float(confidence)
+                    })
+                
+                deteccoes["faces"] = face_names
+                logger.info(f"👥 Faces detectadas: {len(face_names)}")
+                
+            except Exception as e:
+                logger.error(f"❌ Erro detecção faces: {e}")
+
+        # Detecção de Objetos YOLO
+        if self.detector_objetos:
+            try:
+                objetos_detectados, contagem_acumulada = self.detector_objetos.detectar_objetos_rapido(frame)
+                
+                deteccoes["objetos"] = objetos_detectados
+                deteccoes["contagem_objetos"] = contagem_acumulada
+                
+                logger.info(f"📦 Objetos detectados: {len(objetos_detectados)}")
+                
+            except Exception as e:
+                logger.error(f"❌ Erro detecção objetos: {e}")
+
+        # Estatísticas
+        deteccoes["estatisticas"] = {
+            "total_faces": len(deteccoes["faces"]),
+            "total_objetos": len(deteccoes["objetos"]),
+            "faces_conhecidas": len([f for f in deteccoes["faces"] if f["nome"] != "Desconhecido"]),
+            "faces_desconhecidas": len([f for f in deteccoes["faces"] if f["nome"] == "Desconhecido"])
+        }
+
+        return deteccoes
+
+    def responder_pergunta(self, pergunta, deteccoes):
+        """
+        Responde pergunta baseada nas detecções
+        """
+        try:
+            if not self.interpreter:
+                return "Sistema temporariamente indisponível"
+            
+            # Extrair dados das detecções
+            faces_nomes = [face["nome"] for face in deteccoes["faces"]]
+            objetos_detectados = deteccoes["objetos"]
+            
+            resposta = self.interpreter.responder_pergunta(pergunta, objetos_detectados, faces_nomes)
+            
+            logger.info(f"💬 Pergunta: '{pergunta}' -> Resposta: '{resposta}'")
+            
+            return resposta
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao responder pergunta: {e}")
+            return f"Erro ao processar pergunta: {str(e)}"
+
+# Instância global do Occhio Cloud
+occhio_cloud = None
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Endpoint de saúde da API"""
+    return jsonify({
+        "status": "healthy",
+        "service": "Occhio Cloud",
+        "timestamp": time.time()
+    })
+
+@app.route('/processar', methods=['POST'])
+def processar_imagem():
+    """
+    Endpoint para processar imagem e retornar detecções
+    """
+    try:
+        if 'image' not in request.files and 'image_data' not in request.json:
+            return jsonify({
+                "success": False,
+                "error": "Nenhuma imagem fornecida. Use 'image' (form-data) ou 'image_data' (JSON base64)"
+            }), 400
+        
+        # Obter dados da imagem
+        if 'image' in request.files:
+            image_file = request.files['image']
+            image_data = image_file.read()
+        else:
+            image_data = request.json['image_data']
+        
+        # Processar imagem
+        resultado = occhio_cloud.processar_imagem(image_data)
+        
+        return jsonify(resultado)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro endpoint /processar: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/perguntar', methods=['POST'])
+def perguntar():
+    """
+    Endpoint para fazer pergunta sobre uma imagem
+    """
+    try:
+        data = request.json
+        
+        if 'pergunta' not in data:
+            return jsonify({
+                "success": False,
+                "error": "Pergunta não fornecida"
+            }), 400
+        
+        pergunta = data['pergunta']
+        image_data = data.get('image_data')
+        deteccoes = data.get('deteccoes')
+        
+        # Se não forneceu detecções, mas forneceu imagem, processar primeiro
+        if not deteccoes and image_data:
+            resultado_processamento = occhio_cloud.processar_imagem(image_data)
+            if not resultado_processamento['success']:
+                return jsonify(resultado_processamento)
+            deteccoes = resultado_processamento['deteccoes']
+        
+        if not deteccoes:
+            return jsonify({
+                "success": False,
+                "error": "Forneça image_data ou deteccoes"
+            }), 400
+        
+        # Responder pergunta
+        resposta = occhio_cloud.responder_pergunta(pergunta, deteccoes)
+        
+        return jsonify({
+            "success": True,
+            "pergunta": pergunta,
+            "resposta": resposta,
+            "deteccoes": deteccoes,
+            "timestamp": time.time()
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erro endpoint /perguntar: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/deteccoes/estatisticas', methods=['GET'])
+def get_estatisticas():
+    """Retorna estatísticas do sistema"""
+    estatisticas = {
+        "faces_cadastradas": len(occhio_cloud.detector_faces.known_face_names) if occhio_cloud.detector_faces else 0,
+        "detector_objetos_ativo": occhio_cloud.detector_objetos is not None,
+        "detector_faces_ativo": occhio_cloud.detector_faces is not None,
+        "interpreter_ativo": occhio_cloud.interpreter is not None,
+        "timestamp": time.time()
+    }
+    
+    return jsonify(estatisticas)
+
+@app.route('/faces', methods=['GET'])
+def listar_faces():
+    """Lista todas as faces cadastradas"""
+    try:
+        if not occhio_cloud.db:
+            return jsonify({
+                "success": False,
+                "error": "Banco de dados não disponível"
+            }), 500
+            
+        cursor = occhio_cloud.db.conn.cursor()
+        cursor.execute("SELECT imgID, imgNome, imgLabel, imgData FROM user_rec_facial")
+        resultados = cursor.fetchall()
+        cursor.close()
+
+        faces = []
+        for face_id, nome, label, data in resultados:
+            faces.append({
+                "id": face_id,
+                "nome": nome,
+                "label": label,
+                "data_cadastro": data.isoformat() if data else None
+            })
+        
+        return jsonify({
+            "success": True,
+            "faces": faces,
+            "total": len(faces)
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao listar faces: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+def iniciar_servidor(host='0.0.0.0', port=5000, api_key=None):
+    """Inicia o servidor Flask"""
+    global occhio_cloud
+    
+    try:
+        # Inicializar Occhio Cloud
+        occhio_cloud = OcchioCloud(api_key=api_key)
+        
+        logger.info(f"🌐 Iniciando servidor Occhio Cloud em {host}:{port}")
+        app.run(host=host, port=port, debug=False)
+        
+    except Exception as e:
+        logger.error(f"💥 ERRO AO INICIAR SERVIDOR: {e}")
+        raise
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Occhio Cloud Backend")
+    parser.add_argument("--api_key", type=str, required=True, help="API Key da OpenAI")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host do servidor")
+    parser.add_argument("--port", type=int, default=5000, help="Porta do servidor")
     
     args = parser.parse_args()
     
-    try:
-        # Se source for um número, converte para int, senão usa como string (URL)
-        source = int(args.source) if args.source.isdigit() else args.source
-        # Força resolução VGA
-        occhio = Occhio(source=source, width=640, height=480)
-        occhio.run()
-    except Exception as e:
-        logger.error(f"Erro ao iniciar sistema: {e}")
-
-if __name__ == "__main__":
-    main()
+    iniciar_servidor(host=args.host, port=args.port, api_key=args.api_key)

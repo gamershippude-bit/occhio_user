@@ -1,0 +1,9 @@
+.git
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+debug_frames/
+rostos/

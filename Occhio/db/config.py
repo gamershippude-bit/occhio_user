@@ -1,19 +1,24 @@
 """
-Configurações do Banco de Dados
-Este módulo contém as configurações de conexão com o banco de dados MySQL.
+Configurações do Banco de Dados (Produção/Cloud)
+
+Configurações para ambiente de produção na nuvem.
 """
 
-# Configurações do banco de dados MySQL
-db_config = {
-    "host": "localhost",      # Endereço do servidor MySQL
-    "user": "root",          # Nome de usuário
-    "password": "master",    # Senha do usuário
-    "database": "tcc_db",    # Nome do banco de dados
-    "charset": "utf8mb4"     # Codificação de caracteres
-}
+from typing import Dict
+import os
 
-# Configurações adicionais podem ser adicionadas aqui
-# Exemplo:
-# - Timeout de conexão
-# - Pool de conexões
-# - Configurações de SSL 
+def get_test_db_config() -> Dict[str, str]:
+    """
+    Retorna as configurações de conexão para o banco MySQL.
+    Usa variáveis de ambiente para segurança.
+    """
+    return {
+        "host": os.getenv("DB_HOST", "localhost"),
+        "user": os.getenv("DB_USER", "root"),
+        "password": os.getenv("DB_PASSWORD", "master"),
+        "database": os.getenv("DB_NAME", "tcc_db"),
+        "charset": "utf8mb4",
+        "port": int(os.getenv("DB_PORT", "3306")),
+        "connect_timeout": 30,
+        "autocommit": True
+    }

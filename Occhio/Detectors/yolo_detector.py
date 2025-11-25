@@ -1,140 +1,283 @@
 """
-Módulo de Detecção de Objetos usando YOLO
-Este módulo implementa a detecção de objetos utilizando o modelo YOLO,
-fornecendo funcionalidades para:
-- Inicialização do modelo YOLO
-- Detecção de objetos em frames
-- Contagem e classificação de objetos
-- Visualização dos resultados
+Módulo de Detecção de Objetos usando YOLOv8 com detecção em TODOS os frames
 """
 
 import cv2
 from ultralytics import YOLO
-from collections import defaultdict
 import logging
+import numpy as np
+from collections import defaultdict, deque
+import time
 
 logger = logging.getLogger(__name__)
 
+
 class YOLODetector:
-    def __init__(self):
-        """
-        Inicializa o detector YOLO.
-        """
+    def __init__(self, modelo_path="yolov8n.pt", conf_threshold=0.6, iou_threshold=0.5):
+        """Inicializa o detector YOLO com detecção em todos os frames."""
         try:
-            # Carrega o modelo YOLO com configurações otimizadas
-            self.modelo = YOLO('yolov8n.pt')
-            self.conf_threshold = 0.6  # Aumentando threshold para menos detecções
-            self.iou_threshold = 0.5
-            logger.info("Detector YOLO inicializado com sucesso")
+            logger.info(f"Inicializando YOLO com modelo: {modelo_path}")
+            self.modelo = YOLO(modelo_path)
+            self.conf_threshold = conf_threshold
+            self.iou_threshold = iou_threshold
+            
+            # Sistema de contagem mais estável - mantém por 5 frames
+            self.contagem_acumulada = defaultdict(int)
+            self.historico_deteccoes = defaultdict(lambda: deque(maxlen=10))
+            self.ultima_deteccao = defaultdict(int)
+            self.frame_count = 0
+            self.ultimo_log = 0
+            
+            logger.info("YOLOv8 carregado com sistema de contagem estável (5 frames).")
         except Exception as e:
             logger.error(f"Erro ao inicializar YOLO: {e}")
             raise
 
     def detectar_objetos(self, frame):
         """
-        Detecta objetos no frame usando YOLO.
-        
-        Args:
-            frame: Frame de vídeo para detecção
-            
-        Returns:
-            frame: Frame com detecções desenhadas
-            contagem: Dicionário com contagem de objetos
-            status: Status da detecção
+        Detecta objetos em TODOS os frames e desenha caixas sempre.
+        Retorna: (frame_processado, contagem_frame, contagem_acumulada)
         """
         try:
-            # Processa o frame com YOLO usando configurações otimizadas
-            resultados = self.modelo(frame, conf=self.conf_threshold, iou=self.iou_threshold, verbose=False)
+            if not isinstance(frame, np.ndarray) or frame.size == 0:
+                logger.error("YOLO: Frame invalido para detecao")
+                return frame, {}, self.contagem_acumulada.copy()
+
+            self.frame_count += 1
+            frame_processado = frame.copy()
             
-            contagem = {}
-            status = "Nenhum objeto detectado"
-            
-            # Processa apenas o primeiro resultado (mais rápido)
-            if resultados:
+            # ✅ SEMPRE detectar objetos (não pular frames)
+            resultados = self.modelo.predict(
+                source=frame_processado,
+                conf=self.conf_threshold,
+                iou=self.iou_threshold,
+                verbose=False
+            )
+
+            contagem_frame = {}
+            objetos_detectados_agora = []
+
+            if resultados and len(resultados) > 0:
                 r = resultados[0]
-                for box in r.boxes:
-                    cls = int(box.cls[0])
-                    conf = float(box.conf[0])
-                    nome_classe = self.modelo.names[cls]
-                    
-                    if nome_classe not in contagem:
-                        contagem[nome_classe] = 0
-                    contagem[nome_classe] += 1
-                    
-                    # Desenha bounding box apenas para objetos com alta confiança
-                    if conf > 0.7:
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(frame, f"{nome_classe} {conf:.2f}", (x1, y1-10),
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
+                if hasattr(r, 'boxes') and r.boxes is not None:
+                    for box in r.boxes:
+                        cls = int(box.cls)
+                        conf = float(box.conf)
+                        nome_classe = self.modelo.names[cls]
+
+                        # Apenas objetos com confiança alta
+                        if conf >= self.conf_threshold:
+                            contagem_frame[nome_classe] = contagem_frame.get(nome_classe, 0) + 1
+                            objetos_detectados_agora.append(nome_classe)
+                            
+                            # Registrar última detecção
+                            self.ultima_deteccao[nome_classe] = self.frame_count
+                            
+                            # ✅ SEMPRE desenhar caixas nos frames detectados
+                            self._desenhar_caixa(
+                                frame_processado,
+                                tuple(map(int, box.xyxy[0])),
+                                nome_classe,
+                                conf
+                            )
+
+            # ATUALIZAR CONTAGEM COM ESTABILIDADE (mantém por 5 frames)
+            self._atualizar_contagem_estavel(objetos_detectados_agora)
             
-            if contagem:
-                status = "Objetos detectados"
-            
-            return frame, contagem, status
-            
+            # Log a cada 60 frames
+            if self.frame_count - self.ultimo_log >= 60:
+                self._log_estatisticas()
+                self.ultimo_log = self.frame_count
+
+            return frame_processado, contagem_frame, self.contagem_acumulada.copy()
+
         except Exception as e:
-            logger.error(f"Erro ao detectar objetos: {e}")
-            return frame, {}, "Erro na detecção"
+            logger.error(f"YOLO: Erro na detecao: {e}")
+            return frame, {}, self.contagem_acumulada.copy()
+
+    def _atualizar_contagem_estavel(self, objetos_detectados_agora):
+        """Atualiza a contagem mantendo objetos por 5 frames"""
+        
+        # 1. Registrar detecções atuais no histórico
+        for obj in objetos_detectados_agora:
+            self.historico_deteccoes[obj].append(self.frame_count)
+        
+        # 2. Manter objetos que foram detectados recentemente (últimos 5 frames)
+        objetos_ativos = set()
+        for obj, deteccoes in self.historico_deteccoes.items():
+            if deteccoes:
+                # Considerar ativo se foi detectado nos últimos 5 frames
+                frames_desde_ultima_deteccao = self.frame_count - max(deteccoes)
+                if frames_desde_ultima_deteccao <= 5:
+                    objetos_ativos.add(obj)
+        
+        # 3. Atualizar contagem acumulada apenas para objetos ativos
+        nova_contagem = defaultdict(int)
+        
+        # Primeiro, manter objetos que ainda estão ativos
+        for obj in objetos_ativos:
+            if obj in objetos_detectados_agora:
+                # Se detectado agora, usar contagem atual
+                contagem_atual = objetos_detectados_agora.count(obj)
+                nova_contagem[obj] = max(self.contagem_acumulada.get(obj, 0), contagem_atual)
+            else:
+                # Se não detectado agora mas ainda ativo, manter contagem anterior
+                nova_contagem[obj] = self.contagem_acumulada.get(obj, 0)
+        
+        # 4. Adicionar novos objetos detectados agora
+        for obj in set(objetos_detectados_agora):
+            if obj not in nova_contagem:
+                contagem_atual = objetos_detectados_agora.count(obj)
+                nova_contagem[obj] = contagem_atual
+        
+        # 5. Limpar objetos inativos (não detectados há mais de 5 frames)
+        objetos_para_limpar = []
+        for obj in self.contagem_acumulada:
+            if obj not in nova_contagem:
+                objetos_para_limpar.append(obj)
+        
+        for obj in objetos_para_limpar:
+            if obj in self.historico_deteccoes:
+                del self.historico_deteccoes[obj]
+            if obj in self.ultima_deteccao:
+                del self.ultima_deteccao[obj]
+        
+        # 6. Atualizar contagem acumulada
+        self.contagem_acumulada = nova_contagem
+
+    def _log_estatisticas(self):
+        """Log das estatísticas atuais"""
+        if self.contagem_acumulada:
+            total_objetos = sum(self.contagem_acumulada.values())
+            pessoas = self.contagem_acumulada.get('person', 0)
+            
+            logger.info(f"📊 YOLO - Pessoas: {pessoas} | Total objetos: {total_objetos}")
+            
+            if total_objetos > 0:
+                detalhes = ", ".join([f"{obj}({count})" for obj, count in self.contagem_acumulada.items()])
+                logger.info(f"📋 YOLO Detalhes: {detalhes}")
 
     def _desenhar_caixa(self, frame, coords, label, conf):
-        """
-        Desenha a caixa delimitadora e rótulo no frame.
-        
-        Args:
-            frame: Frame onde desenhar
-            coords: Coordenadas da caixa (x1, y1, x2, y2)
-            label: Nome da classe detectada
-            conf: Nível de confiança da detecção
-        """
-        x1, y1, x2, y2 = coords
-        
-        # Desenha retângulo
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        
-        # Prepara texto
-        texto = f"{label} {conf:.2f}"
-        
-        # Calcula tamanho do texto
-        (text_width, text_height), _ = cv2.getTextSize(
-            texto, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
-        )
-        
-        # Desenha fundo para o texto
-        cv2.rectangle(
-            frame,
-            (x1, y1 - text_height - 10),
-            (x1 + text_width, y1),
-            (0, 255, 0),
-            -1
-        )
-        
-        # Desenha texto
-        cv2.putText(
-            frame,
-            texto,
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 0),
-            2
-        )
+        """Desenha uma caixa e o rotulo sobre o objeto."""
+        try:
+            x1, y1, x2, y2 = coords
+            texto = f"{label} {conf:.2f}"
 
-# Instância global do detector
-detector = YOLODetector()
+            # Cores diferentes por categoria
+            if label == 'person':
+                cor = (0, 255, 0)  # Verde para pessoas
+            elif label in ['chair', 'couch', 'bed', 'table', 'dining table']:
+                cor = (255, 165, 0)  # Laranja para móveis
+            elif label in ['laptop', 'tv', 'cell phone', 'monitor']:
+                cor = (0, 255, 255)  # Amarelo para eletrônicos
+            else:
+                cor = (255, 0, 0)  # Vermelho para outros
 
-def detectar_objetos(frame, modelo_path="yolov8n.pt"):
-    """
-    Função de conveniência para detecção de objetos.
-    
-    Args:
-        frame: Frame para detecção
-        modelo_path: Caminho para o modelo YOLO
+            # Caixa mais espessa para melhor visibilidade
+            cv2.rectangle(frame, (x1, y1), (x2, y2), cor, 3)
+            
+            # Fundo do texto
+            (tw, th), _ = cv2.getTextSize(texto, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), cor, -1)
+            
+            # Texto mais legível
+            cv2.putText(frame, texto, (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                        
+        except Exception as e:
+            logger.error(f"YOLO: Erro ao desenhar caixa: {e}")
+
+    def detectar_objetos_rapido(self, frame):
+        """
+        Versão otimizada para detecção em tempo real.
+        Retorna apenas dados, sem processar frame.
+        """
+        try:
+            if not isinstance(frame, np.ndarray) or frame.size == 0:
+                return [], self.contagem_acumulada.copy()
+
+            self.frame_count += 1
+            
+            # Detecção rápida
+            resultados = self.modelo.predict(
+                source=frame,
+                conf=self.conf_threshold,
+                iou=self.iou_threshold,
+                verbose=False
+            )
+
+            objetos_detectados_agora = []
+
+            if resultados and len(resultados) > 0:
+                r = resultados[0]
+                
+                if hasattr(r, 'boxes') and r.boxes is not None:
+                    for box in r.boxes:
+                        cls = int(box.cls)
+                        conf = float(box.conf)
+                        nome_classe = self.modelo.names[cls]
+
+                        if conf >= self.conf_threshold:
+                            objetos_detectados_agora.append(nome_classe)
+                            self.ultima_deteccao[nome_classe] = self.frame_count
+
+            # Atualizar contagem
+            self._atualizar_contagem_estavel(objetos_detectados_agora)
+            
+            return objetos_detectados_agora, self.contagem_acumulada.copy()
+
+        except Exception as e:
+            logger.error(f"YOLO: Erro na detecao rapida: {e}")
+            return [], self.contagem_acumulada.copy()
+
+    def desenhar_deteccoes_apenas(self, frame, objetos_detectados):
+        """
+        Apenas desenha as detecções no frame, sem fazer nova detecção.
+        Útil para quando a detecção já foi feita em outro lugar.
+        """
+        try:
+            frame_processado = frame.copy()
+            
+            # Aqui você precisaria ter as coordenadas das detecções
+            # Como não temos, retornamos o frame original
+            # Em uma implementação completa, você guardaria as últimas coordenadas
+            
+            return frame_processado
+            
+        except Exception as e:
+            logger.error(f"YOLO: Erro ao desenhar detecções: {e}")
+            return frame
+
+    def get_contagem_acumulada(self):
+        """Retorna a contagem acumulada atual"""
+        return self.contagem_acumulada.copy()
+
+    def get_contagem_pessoas(self):
+        """Retorna contagem específica de pessoas"""
+        return self.contagem_acumulada.get('person', 0)
+
+    def get_estatisticas(self):
+        """Retorna estatísticas completas do detector"""
+        objetos_ativos = []
+        for obj in self.contagem_acumulada:
+            if self.historico_deteccoes[obj]:
+                frames_desde_ultima = self.frame_count - max(self.historico_deteccoes[obj])
+                objetos_ativos.append(f"{obj}({self.contagem_acumulada[obj]}, {frames_desde_ultima}f)")
         
-    Returns:
-        Resultados da detecção
-    """
-    global detector
-    if detector.modelo is None:
-        detector = YOLODetector()
-    return detector.detectar_objetos(frame)
+        return {
+            "total_frames": self.frame_count,
+            "contagem_acumulada": dict(self.contagem_acumulada),
+            "pessoas_detectadas": self.get_contagem_pessoas(),
+            "total_objetos": sum(self.contagem_acumulada.values()),
+            "objetos_ativos": objetos_ativos
+        }
+
+    def resetar_contagem(self):
+        """Reseta toda a contagem acumulada"""
+        self.contagem_acumulada.clear()
+        self.historico_deteccoes.clear()
+        self.ultima_deteccao.clear()
+        self.frame_count = 0
+        self.ultimo_log = 0
+        logger.info("🔄 YOLO: Contagem acumulada resetada")
