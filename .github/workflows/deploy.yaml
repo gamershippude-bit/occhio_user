@@ -25,14 +25,68 @@ jobs:
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
 
-    - name: Deploy to Cloud Run
+    - name: Build and Deploy
       run: |
-        gcloud run deploy $SERVICE \
-          --source . \
-          --platform managed \
-          --region $REGION \
-          --memory 2Gi \
-          --cpu 2 \
-          --timeout 300 \
-          --allow-unauthenticated \
-          --set-env-vars="OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},DB_HOST=${{ secrets.DB_HOST }},DB_USER=${{ secrets.DB_USER }},DB_PASSWORD=${{ secrets.DB_PASSWORD }},DB_NAME=${{ secrets.DB_NAME }}"
+        # Build separado para debug
+        gcloud builds submit --config=cloudbuild.yaml .
+        
+    - name: Get Service URL
+      run: |
+        gcloud run services describe $SERVICE --region $REGION --format="value(status.url)"
+
+  cloudbuild:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Create cloudbuild.yaml
+      run: |
+        cat > cloudbuild.yaml << EOF
+        steps:
+          # Build da imagem
+          - name: 'gcr.io/cloud-builders/docker'
+            args: ['build', '-t', 'gcr.io/$PROJECT_ID/$SERVICE', '.']
+            
+          # Push da imagem
+          - name: 'gcr.io/cloud-builders/docker'
+            args: ['push', 'gcr.io/$PROJECT_ID/$SERVICE']
+            
+          # Deploy no Cloud Run
+          - name: 'gcr.io/cloud-builders/gcloud'
+            args: 
+            - 'run'
+            - 'deploy'
+            - '$SERVICE'
+            - '--image'
+            - 'gcr.io/$PROJECT_ID/$SERVICE'
+            - '--region'
+            - '$REGION'
+            - '--platform'
+            - 'managed'
+            - '--memory'
+            - '2Gi'
+            - '--cpu'
+            - '2'
+            - '--timeout'
+            - '300'
+            - '--allow-unauthenticated'
+            - '--set-env-vars'
+            - 'OPENAI_API_KEY=$OPENAI_API_KEY,DB_HOST=$DB_HOST,DB_USER=$DB_USER,DB_PASSWORD=$DB_PASSWORD,DB_NAME=$DB_NAME'
+            
+        images:
+          - 'gcr.io/$PROJECT_ID/$SERVICE'
+        EOF
+        
+    - name: Submit Build
+      uses: google-github-actions/cloud-build@v1
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        credentials: ${{ secrets.GCP_SA_KEY }}
+        images: gcr.io/${{ secrets.GCP_PROJECT_ID }}/$SERVICE
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
