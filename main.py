@@ -1,3 +1,4 @@
+# 🚀 Deploy para novo projeto GCP - $(date)
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
 VERSÃO BACKEND/CLOUD - Remove interface visual, adiciona endpoints API
@@ -459,6 +460,8 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    iniciar_servidor(host=args.host, port=args.port, api_key=args.api_key)#   D e p l o y   t r i g g e r   -   1 1 / 2 5 / 2 0 2 5   2 0 : 3 8 : 2 8  
-    
+    iniciar_servidor(host=args.host, port=args.port, api_key=args.api_key)#   D e p l o y   t r i g g e r   -   1 1 / 2 5 / 2 0 2 5   2 0 : 3 8 : 2 8 
+ 
+   
+ 
  
