@@ -39,6 +39,21 @@ logger = logging.getLogger("Occhio-Cloud")
 
 app = Flask(__name__)
 
+# Health check MUITO simples - deve vir ANTES da classe
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Endpoint de saúde MUITO simples"""
+    return jsonify({
+        "status": "healthy", 
+        "service": "Occhio Cloud",
+        "timestamp": time.time()
+    })
+
+@app.route('/health-simple', methods=['GET'])
+def health_check_simple():
+    """Endpoint de saúde SUPER simples"""
+    return "OK", 200
+
 class OcchioCloud:
     """Classe principal do sistema de visão computacional para cloud"""
 
@@ -296,15 +311,6 @@ class OcchioCloud:
 # Instância global do Occhio Cloud
 occhio_cloud = None
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Endpoint de saúde da API"""
-    return jsonify({
-        "status": "healthy",
-        "service": "Occhio Cloud",
-        "timestamp": time.time()
-    })
-
 @app.route('/processar', methods=['POST'])
 def processar_imagem():
     """
@@ -388,6 +394,12 @@ def perguntar():
 @app.route('/deteccoes/estatisticas', methods=['GET'])
 def get_estatisticas():
     """Retorna estatísticas do sistema"""
+    if occhio_cloud is None:
+        return jsonify({
+            "success": False,
+            "error": "Sistema não inicializado"
+        }), 500
+        
     estatisticas = {
         "faces_cadastradas": len(occhio_cloud.detector_faces.known_face_names) if occhio_cloud.detector_faces else 0,
         "detector_objetos_ativo": occhio_cloud.detector_objetos is not None,
@@ -402,7 +414,7 @@ def get_estatisticas():
 def listar_faces():
     """Lista todas as faces cadastradas"""
     try:
-        if not occhio_cloud.db:
+        if not occhio_cloud or not occhio_cloud.db:
             return jsonify({
                 "success": False,
                 "error": "Banco de dados não disponível"
@@ -441,9 +453,12 @@ def iniciar_servidor(host='0.0.0.0', port=5000, api_key=None):
     
     try:
         # Inicializar Occhio Cloud
+        logger.info("🔄 Inicializando Occhio Cloud...")
         occhio_cloud = OcchioCloud(api_key=api_key)
         
         logger.info(f"🌐 Iniciando servidor Occhio Cloud em {host}:{port}")
+        
+        # Usar Flask diretamente (mais simples para Cloud Run)
         app.run(host=host, port=port, debug=False)
         
     except Exception as e:
@@ -451,13 +466,19 @@ def iniciar_servidor(host='0.0.0.0', port=5000, api_key=None):
         raise
 
 if __name__ == "__main__":
-    import argparse
+    import os
     
-    parser = argparse.ArgumentParser(description="Occhio Cloud Backend")
-    parser.add_argument("--api_key", type=str, required=True, help="API Key da OpenAI")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host do servidor")
-    parser.add_argument("--port", type=int, default=5000, help="Porta do servidor")
+    # Para Cloud Run - pega das variáveis de ambiente
+    api_key = os.getenv('OPENAI_API_KEY')
+    port = int(os.getenv('PORT', '8080'))
     
-    args = parser.parse_args()
+    if not api_key:
+        print("❌ ERRO: OPENAI_API_KEY não configurada")
+        print("💡 Configure a variável de ambiente OPENAI_API_KEY")
+        exit(1)
     
-    iniciar_servidor(host=args.host, port=args.port, api_key=args.api_key)
+    # Log inicial para debug
+    print(f"🚀 Iniciando Occhio na porta {port}")
+    print(f"🔑 API Key: {api_key[:10]}...")  # Log parcial por segurança
+    
+    iniciar_servidor(host='0.0.0.0', port=port, api_key=api_key)

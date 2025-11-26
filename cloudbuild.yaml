@@ -24,7 +24,7 @@ steps:
     - '--cpu'
     - '2'
     - '--timeout'
-    - '300'
+    - '600'                    # 👈 Aumentei para 600 segundos
     - '--allow-unauthenticated'
     - '--set-env-vars'
     - 'OPENAI_API_KEY=$_OPENAI_API_KEY,DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DB_NAME=$_DB_NAME'
