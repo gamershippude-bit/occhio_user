@@ -54,6 +54,30 @@ def health_check_simple():
     """Endpoint de saúde SUPER simples"""
     return "OK", 200
 
+@app.route('/ready', methods=['GET'])
+def ready_check():
+    """Endpoint de readiness - verifica se sistema está inicializado"""
+    global occhio_cloud
+    if occhio_cloud is not None:
+        return jsonify({"status": "ready", "initialized": True})
+    else:
+        return jsonify({"status": "initializing", "initialized": False}), 503
+
+@app.before_first_request
+def initialize_occhio():
+    """Inicializa o Occhio Cloud apenas quando a primeira requisição chegar"""
+    global occhio_cloud
+    if occhio_cloud is None:
+        try:
+            logger.info("🔄 Inicializando Occhio Cloud na primeira requisição...")
+            api_key = os.getenv('OPENAI_API_KEY')
+            occhio_cloud = OcchioCloud(api_key=api_key)
+            logger.info("✅ Occhio Cloud inicializado com sucesso!")
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar Occhio Cloud: {e}")
+            occhio_cloud = None
+            raise
+
 class OcchioCloud:
     """Classe principal do sistema de visão computacional para cloud"""
 
@@ -308,7 +332,7 @@ class OcchioCloud:
             logger.error(f"❌ Erro ao responder pergunta: {e}")
             return f"Erro ao processar pergunta: {str(e)}"
 
-# Instância global do Occhio Cloud
+# Instância global do Occhio Cloud - INICIALMENTE NULA
 occhio_cloud = None
 
 @app.route('/processar', methods=['POST'])
@@ -316,7 +340,15 @@ def processar_imagem():
     """
     Endpoint para processar imagem e retornar detecções
     """
+    global occhio_cloud
     try:
+        # Verificar se sistema está inicializado
+        if occhio_cloud is None:
+            return jsonify({
+                "success": False,
+                "error": "Sistema ainda não inicializado. Tente novamente em alguns segundos."
+            }), 503
+        
         if 'image' not in request.files and 'image_data' not in request.json:
             return jsonify({
                 "success": False,
@@ -347,7 +379,15 @@ def perguntar():
     """
     Endpoint para fazer pergunta sobre uma imagem
     """
+    global occhio_cloud
     try:
+        # Verificar se sistema está inicializado
+        if occhio_cloud is None:
+            return jsonify({
+                "success": False,
+                "error": "Sistema ainda não inicializado. Tente novamente em alguns segundos."
+            }), 503
+        
         data = request.json
         
         if 'pergunta' not in data:
@@ -394,11 +434,12 @@ def perguntar():
 @app.route('/deteccoes/estatisticas', methods=['GET'])
 def get_estatisticas():
     """Retorna estatísticas do sistema"""
+    global occhio_cloud
     if occhio_cloud is None:
         return jsonify({
             "success": False,
             "error": "Sistema não inicializado"
-        }), 500
+        }), 503
         
     estatisticas = {
         "faces_cadastradas": len(occhio_cloud.detector_faces.known_face_names) if occhio_cloud.detector_faces else 0,
@@ -413,8 +454,15 @@ def get_estatisticas():
 @app.route('/faces', methods=['GET'])
 def listar_faces():
     """Lista todas as faces cadastradas"""
+    global occhio_cloud
     try:
-        if not occhio_cloud or not occhio_cloud.db:
+        if occhio_cloud is None:
+            return jsonify({
+                "success": False,
+                "error": "Sistema não inicializado"
+            }), 503
+            
+        if not occhio_cloud.db:
             return jsonify({
                 "success": False,
                 "error": "Banco de dados não disponível"
@@ -452,13 +500,9 @@ def iniciar_servidor(host='0.0.0.0', port=5000, api_key=None):
     global occhio_cloud
     
     try:
-        # Inicializar Occhio Cloud
-        logger.info("🔄 Inicializando Occhio Cloud...")
-        occhio_cloud = OcchioCloud(api_key=api_key)
-        
         logger.info(f"🌐 Iniciando servidor Occhio Cloud em {host}:{port}")
         
-        # Usar Flask diretamente (mais simples para Cloud Run)
+        # Usar Flask diretamente (para desenvolvimento local)
         app.run(host=host, port=port, debug=False)
         
     except Exception as e:
@@ -466,9 +510,7 @@ def iniciar_servidor(host='0.0.0.0', port=5000, api_key=None):
         raise
 
 if __name__ == "__main__":
-    import os
-    
-    # Para Cloud Run - pega das variáveis de ambiente
+    # Isso só roda localmente, no Cloud Run o gunicorn cuida disso
     api_key = os.getenv('OPENAI_API_KEY')
     port = int(os.getenv('PORT', '8080'))
     

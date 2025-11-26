@@ -26,4 +26,4 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["python", "main.py", "--host", "0.0.0.0", "--port", "8080"]
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 120 main:app
