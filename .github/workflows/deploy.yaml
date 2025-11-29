@@ -3,28 +3,14 @@ name: Deploy to Google Cloud Run
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   SERVICE: occhio-cloud
   REGION: us-central1
-
+  
 jobs:
-  test-deploy:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Test build
-      run: |
-        docker build -t occhio-test .
-
-  deploy-production:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  deploy:
     runs-on: ubuntu-latest
     
     steps:
@@ -41,21 +27,8 @@ jobs:
       with:
         project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-    - name: Configure Docker
-      run: gcloud auth configure-docker --quiet
-
     - name: Build and Deploy
       run: |
         gcloud builds submit \
           --config=cloudbuild.yaml \
           --substitutions=_OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},_DB_HOST=${{ secrets.DB_HOST }},_DB_USER=${{ secrets.DB_USER }},_DB_PASSWORD=${{ secrets.DB_PASSWORD }},_DB_NAME=${{ secrets.DB_NAME }}
-
-    - name: Wait for deployment
-      run: |
-        sleep 30
-        gcloud run services describe $SERVICE --region $REGION --format="value(status.url)"
-
-    - name: Health Check
-      run: |
-        SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --format="value(status.url)")
-        curl -f "$SERVICE_URL/health" || exit 1

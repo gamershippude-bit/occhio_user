@@ -1,5 +1,5 @@
 steps:
-  # Build da imagem com cache
+  # Build da imagem com cache - CORRIGIDO
   - name: 'gcr.io/cloud-builders/docker'
     args: 
       - 'build'
@@ -41,9 +41,5 @@ steps:
     - '--set-env-vars'
     - 'OPENAI_API_KEY=$_OPENAI_API_KEY,DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DB_NAME=$_DB_NAME,PYTHONUNBUFFERED=1'
 
-options:
-  logging: CLOUD_LOGGING_ONLY
-
 images:
-  - 'gcr.io/$PROJECT_ID/occhio-cloud:latest'
-  - 'gcr.io/$PROJECT_ID/occhio-cloud:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/occhio-cloud:latest'  
