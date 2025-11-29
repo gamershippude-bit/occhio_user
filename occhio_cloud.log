@@ -1,0 +1,4 @@
+2025-11-29 19:44:42,200 - Occhio-Cloud - ERROR - ❌ OPENAI_API_KEY não configurada
+2025-11-29 20:21:40,799 - Occhio-Cloud - ERROR - ❌ OPENAI_API_KEY não configurada
+2025-11-29 20:21:56,501 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud na porta 8080
+2025-11-29 20:21:56,511 - waitress - INFO - Serving on http://0.0.0.0:8080

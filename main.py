@@ -283,8 +283,7 @@ class OcchioCloud:
         try:
             frame = self._decode_image(image_data)
             
-            # Obter detecções detalhadas para o interpreter
-            deteccoes_rapidas = self._processar_deteccoes_rapidas(frame)
+            # Obter detecções COMPLETAS para o interpreter
             coordenadas = self._obter_coordenadas_detalhadas(frame)
             
             # Preparar dados para o interpreter CORRIGIDO
@@ -298,15 +297,22 @@ class OcchioCloud:
                 else:
                     faces_nomes.append("Desconhecido")
             
-            # Extrair objetos (usando YOLO)
-            if self.detector_objetos:
-                objetos_detectados, _ = self.detector_objetos.detectar_objetos_rapido(frame)
+            # Extrair objetos DETALHADOS (nomes das classes)
+            for obj in coordenadas.get("objetos", []):
+                objetos_detectados.append(obj["classe"])
+            
+            # DEBUG: Log dos dados enviados para o interpreter
+            logger.info(f"🔍 Dados para interpreter - Pergunta: '{pergunta}'")
+            logger.info(f"🔍 Faces: {faces_nomes}")
+            logger.info(f"🔍 Objetos: {objetos_detectados}")
             
             # Usar interpreter CORRIGIDO para resposta inteligente
             if self.interpreter:
                 resposta = self.interpreter.responder_pergunta(pergunta, objetos_detectados, faces_nomes)
+                logger.info(f"💬 Resposta do interpreter: {resposta}")
             else:
                 # Fallback para resposta básica
+                deteccoes_rapidas = self._processar_deteccoes_rapidas(frame)
                 resposta = self._gerar_resposta_textual_rapida(deteccoes_rapidas)
             
             return {
@@ -316,7 +322,7 @@ class OcchioCloud:
                 "deteccoes": {
                     "faces": len(faces_nomes),
                     "objetos": len(objetos_detectados),
-                    "faces_conhecidas": deteccoes_rapidas["faces_conhecidas"]
+                    "faces_conhecidas": len([nome for nome in faces_nomes if nome != "Desconhecido"])
                 },
                 "timestamp": time.time()
             }
@@ -442,13 +448,41 @@ class OcchioCloud:
             except Exception as e:
                 logger.error(f"❌ Erro coordenadas faces: {e}")
 
-        # Coordenadas dos objetos
+        # Coordenadas dos objetos - CORRIGIDO
         if self.detector_objetos:
             try:
-                objetos_coords = self.detector_objetos.obter_coordenadas_objetos(frame)
-                coordenadas["objetos"] = objetos_coords
+                # Usar o método que realmente retorna coordenadas
+                objetos_detalhados = self.detector_objetos.obter_coordenadas_objetos(frame)
+                
+                # Se não retornou nada, tentar método alternativo
+                if not objetos_detalhados:
+                    objetos_detectados, confiancas = self.detector_objetos.detectar_objetos_rapido(frame)
+                    for i, obj in enumerate(objetos_detectados):
+                        coordenadas["objetos"].append({
+                            "classe": obj,
+                            "confianca": float(confiancas.get(obj, 0.5)),
+                            "caixa": {
+                                "x1": 0, "y1": 0, "x2": 100, "y2": 100  # Placeholder
+                            }
+                        })
+                else:
+                    coordenadas["objetos"] = objetos_detalhados
+                    
+                logger.info(f"📦 Objetos detectados: {len(coordenadas['objetos'])}")
+                
             except Exception as e:
                 logger.error(f"❌ Erro coordenadas objetos: {e}")
+                # Fallback básico
+                try:
+                    objetos_detectados, _ = self.detector_objetos.detectar_objetos_rapido(frame)
+                    for obj in objetos_detectados:
+                        coordenadas["objetos"].append({
+                            "classe": obj,
+                            "confianca": 0.7,
+                            "caixa": {"x1": 0, "y1": 0, "x2": 100, "y2": 100}
+                        })
+                except:
+                    pass
 
         return coordenadas
 
@@ -520,6 +554,7 @@ def perguntar():
         if not image_data:
             return jsonify({"success": False, "error": "Forneça image_data"}), 400
         
+        logger.info(f"❓ Nova pergunta: '{pergunta}'")
         resultado = occhio.responder_pergunta(image_data, pergunta)
         return jsonify(resultado)
         
@@ -629,23 +664,28 @@ def completo():
         
         pergunta = request.json.get('pergunta', 'Descreva o que você vê nesta imagem')
         
-        # Processar tudo
-        resultado_completo = occhio.processar_completo(image_data)
-        if not resultado_completo['success']:
-            return jsonify(resultado_completo)
+        logger.info(f"🎯 Endpoint COMPLETO - Pergunta: '{pergunta}'")
         
         # Usar interpreter CORRIGIDO para resposta inteligente
-        resposta_inteligente = resultado_completo['analise_rapida']['resposta']
         if occhio.interpreter:
             frame = occhio._decode_image(image_data)
-            deteccoes_rapidas = occhio._processar_deteccoes_rapidas(frame)
             coordenadas = occhio._obter_coordenadas_detalhadas(frame)
             
             faces_nomes = [face["nome"] for face in coordenadas.get("faces", [])]
-            objetos_detectados, _ = occhio.detector_objetos.detectar_objetos_rapido(frame) if occhio.detector_objetos else ([], {})
+            objetos_detectados = [obj["classe"] for obj in coordenadas.get("objetos", [])]
+            
+            logger.info(f"🔍 Dados para interpreter - Faces: {faces_nomes}, Objetos: {objetos_detectados}")
             
             # USANDO O INTERPRETER CORRIGIDO
             resposta_inteligente = occhio.interpreter.responder_pergunta(pergunta, objetos_detectados, faces_nomes)
+            logger.info(f"💬 Resposta inteligente: {resposta_inteligente}")
+        else:
+            resposta_inteligente = "Interpreter não disponível"
+        
+        # Processar análise completa
+        resultado_completo = occhio.processar_completo(image_data)
+        if not resultado_completo['success']:
+            return jsonify(resultado_completo)
         
         return jsonify({
             "success": True,
