@@ -22,3 +22,22 @@ def get_test_db_config() -> Dict[str, str]:
         "connect_timeout": 30,
         "autocommit": True
     }
+
+# 🔥 ADICIONE ESTA FUNÇÃO QUE ESTÁ FALTANDO:
+def get_cloud_db_config() -> Dict[str, str]:
+    """
+    Retorna as configurações de conexão para o banco em cloud.
+    Para desenvolvimento local, usa SQLite.
+    """
+    # Se não tiver config de nuvem, usa SQLite local
+    if not os.getenv("DB_HOST"):
+        return {
+            "database": "occhio_local.db",
+            "host": "localhost", 
+            "user": "localuser",
+            "password": "localpass",
+            "port": 3306
+        }
+    
+    # Se tiver variáveis de ambiente, usa MySQL
+    return get_test_db_config()
