@@ -1,19 +1,15 @@
 steps:
-  # Build da imagem com cache - CORRIGIDO
+  # Build da imagem
   - name: 'gcr.io/cloud-builders/docker'
     args: 
       - 'build'
-      - '--build-arg'
-      - 'BUILDKIT_INLINE_CACHE=1'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/occhio-cloud:latest'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/occhio-cloud:$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/occhio-cloud'
       - '.'
     
   # Push da imagem  
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/occhio-cloud:latest']
+    args: ['push', 'gcr.io/$PROJECT_ID/occhio-cloud']
     
   # Deploy no Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -22,7 +18,7 @@ steps:
     - 'deploy'
     - 'occhio-cloud'
     - '--image'
-    - 'gcr.io/$PROJECT_ID/occhio-cloud:latest'
+    - 'gcr.io/$PROJECT_ID/occhio-cloud'
     - '--region'
     - 'us-central1'
     - '--platform'
@@ -33,13 +29,9 @@ steps:
     - '2'
     - '--timeout'
     - '600'
-    - '--concurrency'
-    - '80'
-    - '--max-instances'
-    - '10'
     - '--allow-unauthenticated'
     - '--set-env-vars'
     - 'OPENAI_API_KEY=$_OPENAI_API_KEY,DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DB_NAME=$_DB_NAME,PYTHONUNBUFFERED=1'
 
 images:
-  - 'gcr.io/$PROJECT_ID/occhio-cloud:latest'  
+  - 'gcr.io/$PROJECT_ID/occhio-cloud'

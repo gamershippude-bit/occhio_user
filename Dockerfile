@@ -1,8 +1,8 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instalar dependências do sistema de forma mais eficiente
+# Instalar dependências do sistema
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copiar requirements primeiro (para melhor cache do Docker)
+# Copiar requirements primeiro
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -31,9 +31,5 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health-simple || exit 1
-
-# Comando otimizado para produção
-CMD exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile - main:app
+# Comando de inicialização
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 120 main:app

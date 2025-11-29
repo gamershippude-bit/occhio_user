@@ -1,30 +1,29 @@
 # Flask e servidor web
-flask>=2.3.0
-gunicorn>=21.0.0
-waitress>=2.1.0
+flask==2.3.3
+gunicorn==21.2.0
+waitress==2.1.2
 
 # Detecção facial e visão computacional
-face-recognition>=1.3.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-pillow>=10.0.0
+face-recognition==1.3.0
+opencv-python==4.8.1.78
+numpy==1.24.3
+pillow==10.0.1
 
 # YOLO e detecção de objetos
-torch>=2.0.0
-torchvision>=0.15.0
-ultralytics>=8.0.0
+torch==2.0.1
+torchvision==0.15.2
+ultralytics==8.0.186
 
 # OpenAI
-openai>=1.0.0
+openai==1.3.0
 
-# Banco de dados
-mysql-connector-python>=8.1.0
-sqlite3
+# Banco de dados - TROQUE mysql-connector por pymysql
+pymysql==1.1.0
 
 # Utilitários
-requests>=2.31.0
-python-dotenv>=1.0.0
-pybase64>=1.3.0
+requests==2.31.0
+python-dotenv==1.0.0
+pybase64==1.3.1
 
 # Logging
-colorlog>=6.7.0
+colorlog==6.7.0
