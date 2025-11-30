@@ -21,3 +21,134 @@
 2025-11-30 17:04:32,162 - Utils.interpreter - INFO - ✅ Cliente OpenAI configurado para gpt-4o-mini
 2025-11-30 17:04:32,162 - Occhio-Cloud - INFO - ✅ Interpreter OK - Versão Corrigida
 2025-11-30 17:04:32,162 - Occhio-Cloud - INFO - 🎉 Occhio Cloud inicializado com sucesso!
+2025-11-30 17:05:36,264 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud na porta 8080
+2025-11-30 17:05:36,268 - waitress - INFO - Serving on http://0.0.0.0:8080
+2025-11-30 17:05:43,118 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud Backend
+2025-11-30 17:05:43,118 - Occhio-Cloud - INFO - 🔧 Inicializando detectores...
+2025-11-30 17:05:43,118 - Detectors.yolo_detector - INFO - Inicializando YOLO otimizado: yolov8n.pt
+2025-11-30 17:05:43,502 - Detectors.yolo_detector - INFO - ✅ YOLOv8 otimizado carregado
+2025-11-30 17:05:43,502 - Occhio-Cloud - INFO - ✅ YOLO inicializado com sucesso
+2025-11-30 17:05:43,502 - Detectors.face_detector - INFO - Detector de faces inicializado com sucesso.
+2025-11-30 17:05:43,503 - Occhio-Cloud - INFO - ✅ Face detector inicializado com sucesso
+2025-11-30 17:05:43,507 - occhio.db.database - INFO - ✅ Conexão com banco de dados estabelecida.
+2025-11-30 17:05:43,508 - occhio.db.database - INFO - 📊 Conectado ao banco: tcc_db
+2025-11-30 17:05:43,517 - Occhio-Cloud - INFO - ✅ Banco inicializado com sucesso
+2025-11-30 17:05:43,802 - Utils.interpreter - INFO - ✅ Cliente OpenAI configurado para gpt-4o-mini
+2025-11-30 17:05:43,802 - Occhio-Cloud - INFO - ✅ Interpreter OK - Versão Corrigida
+2025-11-30 17:05:43,803 - Occhio-Cloud - INFO - 🎉 Occhio Cloud inicializado com sucesso!
+2025-11-30 17:05:56,026 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:05:58,830 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:00,909 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'Quantas pessoas estão na foto?'
+2025-11-30 17:06:01,463 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:01,526 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'Quantas pessoas estão na foto?'
+2025-11-30 17:06:01,526 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:01,526 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:01,526 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Quantas pessoas estão na foto?'
+2025-11-30 17:06:01,527 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:01,527 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:01,527 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:01,527 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:01,527 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:01,528 - Utils.interpreter - INFO - 🎯 Resposta controlada: Detectei 1 pessoa.
+2025-11-30 17:06:01,528 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Detectei 1 pessoa.
+2025-11-30 17:06:04,543 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'O que tem nesta imagem?'
+2025-11-30 17:06:05,104 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:05,155 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'O que tem nesta imagem?'
+2025-11-30 17:06:05,155 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:05,155 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:05,155 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'O que tem nesta imagem?'
+2025-11-30 17:06:05,156 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:05,156 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:05,156 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:05,156 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:05,156 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:05,157 - Utils.interpreter - INFO - 🎯 Resposta controlada: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:05,157 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:08,184 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'Tem cadeiras na imagem?'
+2025-11-30 17:06:08,727 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:08,870 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'Tem cadeiras na imagem?'
+2025-11-30 17:06:08,870 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:08,870 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:08,870 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Tem cadeiras na imagem?'
+2025-11-30 17:06:08,870 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:08,871 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:08,871 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:08,871 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:08,871 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:08,871 - Utils.interpreter - INFO - 🎯 Resposta controlada: Não detectei cadeiras na imagem.
+2025-11-30 17:06:08,871 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Não detectei cadeiras na imagem.
+2025-11-30 17:06:11,894 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'Tem livros na imagem?'
+2025-11-30 17:06:12,438 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:12,481 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'Tem livros na imagem?'
+2025-11-30 17:06:12,482 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:12,482 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:12,482 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Tem livros na imagem?'
+2025-11-30 17:06:12,482 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:12,482 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:12,482 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:12,483 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:12,483 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:12,483 - Utils.interpreter - INFO - 🎯 Resposta controlada: Não detectei livros na imagem.
+2025-11-30 17:06:12,483 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Não detectei livros na imagem.
+2025-11-30 17:06:15,517 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'Tem carros na imagem?'
+2025-11-30 17:06:16,061 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:16,106 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'Tem carros na imagem?'
+2025-11-30 17:06:16,106 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:16,106 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:16,106 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Tem carros na imagem?'
+2025-11-30 17:06:16,107 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:16,107 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:16,107 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:16,107 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:16,107 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:16,107 - Utils.interpreter - INFO - 🎯 Resposta controlada: Não detectei carros na imagem.
+2025-11-30 17:06:16,108 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Não detectei carros na imagem.
+2025-11-30 17:06:19,150 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'O céu é azul?'
+2025-11-30 17:06:19,698 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:19,738 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'O céu é azul?'
+2025-11-30 17:06:19,738 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:19,739 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:19,739 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'O céu é azul?'
+2025-11-30 17:06:19,739 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:19,739 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:21,879 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2025-11-30 17:06:21,891 - Utils.interpreter - INFO - 📥 Resposta geral do OpenAI: Sim, o céu geralmente parece azul durante o dia devido à dispersão da luz solar na atmosfera.
+2025-11-30 17:06:21,891 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Sim, o céu geralmente parece azul durante o dia devido à dispersão da luz solar na atmosfera.
+2025-11-30 17:06:24,949 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'Descreva o ambiente'
+2025-11-30 17:06:25,515 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:25,555 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'Descreva o ambiente'
+2025-11-30 17:06:25,555 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:25,555 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:25,556 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Descreva o ambiente'
+2025-11-30 17:06:25,556 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:25,556 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:25,556 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:25,556 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:25,556 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:25,557 - Utils.interpreter - INFO - 🎯 Resposta controlada: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:25,557 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:28,580 - Occhio-Cloud - INFO - ❓ Nova pergunta: 'Qual é o conteúdo desta imagem?'
+2025-11-30 17:06:29,126 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:29,166 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Pergunta: 'Qual é o conteúdo desta imagem?'
+2025-11-30 17:06:29,167 - Occhio-Cloud - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:29,167 - Occhio-Cloud - INFO - 🔍 Objetos: ['person', 'person']
+2025-11-30 17:06:29,167 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Qual é o conteúdo desta imagem?'
+2025-11-30 17:06:29,168 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:29,168 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:29,168 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:29,168 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:29,168 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:29,168 - Utils.interpreter - INFO - 🎯 Resposta controlada: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:29,169 - Occhio-Cloud - INFO - 💬 Resposta do interpreter: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:32,190 - Occhio-Cloud - INFO - 🎯 Endpoint COMPLETO - Pergunta: 'Descreva detalhadamente o que você vê'
+2025-11-30 17:06:32,747 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 17:06:32,786 - Occhio-Cloud - INFO - 🔍 Dados para interpreter - Faces: ['Desconhecido'], Objetos: ['person', 'person']
+2025-11-30 17:06:32,787 - Utils.interpreter - INFO - 🔍 Interpreter recebendo - Pergunta: 'Descreva detalhadamente o que você vê'
+2025-11-30 17:06:32,787 - Utils.interpreter - INFO - 🔍 Faces: ['Desconhecido']
+2025-11-30 17:06:32,787 - Utils.interpreter - INFO - 🔍 Objetos detectados: ['person', 'person']
+2025-11-30 17:06:32,788 - Utils.interpreter - INFO - 🔍 Dados para resposta controlada:
+2025-11-30 17:06:32,788 - Utils.interpreter - INFO -    - Pessoas: 1
+2025-11-30 17:06:32,788 - Utils.interpreter - INFO -    - Objetos: {'person': 2}
+2025-11-30 17:06:32,788 - Utils.interpreter - INFO - 🎯 Resposta controlada: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:32,788 - Occhio-Cloud - INFO - 💬 Resposta inteligente: Detectei 1 pessoa e 2 pessoas.
+2025-11-30 17:06:33,474 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
