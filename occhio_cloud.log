@@ -2,3 +2,22 @@
 2025-11-29 20:21:40,799 - Occhio-Cloud - ERROR - ❌ OPENAI_API_KEY não configurada
 2025-11-29 20:21:56,501 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud na porta 8080
 2025-11-29 20:21:56,511 - waitress - INFO - Serving on http://0.0.0.0:8080
+2025-11-29 21:41:56,107 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud na porta 8080
+2025-11-29 21:41:56,113 - waitress - INFO - Serving on http://0.0.0.0:8080
+2025-11-30 16:59:59,210 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud na porta 8080
+2025-11-30 16:59:59,215 - waitress - INFO - Serving on http://0.0.0.0:8080
+2025-11-30 17:04:15,210 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud Backend
+2025-11-30 17:04:15,210 - Occhio-Cloud - INFO - 🔧 Inicializando detectores...
+2025-11-30 17:04:15,210 - Detectors.yolo_detector - INFO - Inicializando YOLO otimizado: yolov8n.pt
+2025-11-30 17:04:15,666 - Detectors.yolo_detector - INFO - ✅ YOLOv8 otimizado carregado
+2025-11-30 17:04:15,667 - Occhio-Cloud - INFO - ✅ YOLO inicializado com sucesso
+2025-11-30 17:04:15,667 - Detectors.face_detector - INFO - Detector de faces inicializado com sucesso.
+2025-11-30 17:04:15,668 - Occhio-Cloud - INFO - ✅ Face detector inicializado com sucesso
+2025-11-30 17:04:19,744 - occhio.db.database - WARNING - ⚠️ Tentativa 1/3 falhou: (2003, "Can't connect to MySQL server on 'localhost' ([WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente)")
+2025-11-30 17:04:25,794 - occhio.db.database - WARNING - ⚠️ Tentativa 2/3 falhou: (2003, "Can't connect to MySQL server on 'localhost' ([WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente)")
+2025-11-30 17:04:31,843 - occhio.db.database - WARNING - ⚠️ Tentativa 3/3 falhou: (2003, "Can't connect to MySQL server on 'localhost' ([WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente)")
+2025-11-30 17:04:31,844 - occhio.db.database - ERROR - ❌ Falha após 3 tentativas: (2003, "Can't connect to MySQL server on 'localhost' ([WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente)")
+2025-11-30 17:04:31,844 - Occhio-Cloud - ERROR - ❌ Erro Banco: (2003, "Can't connect to MySQL server on 'localhost' ([WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente)")
+2025-11-30 17:04:32,162 - Utils.interpreter - INFO - ✅ Cliente OpenAI configurado para gpt-4o-mini
+2025-11-30 17:04:32,162 - Occhio-Cloud - INFO - ✅ Interpreter OK - Versão Corrigida
+2025-11-30 17:04:32,162 - Occhio-Cloud - INFO - 🎉 Occhio Cloud inicializado com sucesso!

@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Teste para a API Occhio Cloud
-Autor: Seu Amigo
+Teste para a API Occhio Cloud LOCAL
+Autor: Teste Local
 """
 
 import requests
 import base64
 import json
 import sys
+import time
 from pathlib import Path
 
-# Configurações
-API_URL = "https://occhio-cloud-l6d4xbh4va-uc.a.run.app"
+# Configurações para servidor LOCAL
+API_URL = "http://localhost:8080"  # ← MUDOU PARA LOCALHOST
 
 def image_to_base64(image_path):
     """Converte imagem para base64"""
@@ -25,26 +26,35 @@ def image_to_base64(image_path):
 
 def test_health():
     """Testa endpoints de saúde"""
-    print("🧪 Testando saúde da API...")
+    print("🧪 Testando saúde da API LOCAL...")
     
     try:
         # Health Simple
-        response = requests.get(f"{API_URL}/health-simple")
+        response = requests.get(f"{API_URL}/health-simple", timeout=10)
         print(f"✅ Health Simple: {response.text} (Status: {response.status_code})")
         
         # Health Check
-        response = requests.get(f"{API_URL}/health")
+        response = requests.get(f"{API_URL}/health", timeout=10)
         health_data = response.json()
         print(f"✅ Health Check: {health_data}")
         
         # Estatísticas
-        response = requests.get(f"{API_URL}/estatisticas")
+        response = requests.get(f"{API_URL}/estatisticas", timeout=10)
         stats = response.json()
         print("📊 Estatísticas do Sistema:")
         print(json.dumps(stats, indent=2, ensure_ascii=False))
         
+    except requests.exceptions.ConnectionError:
+        print("❌ ERRO: Não consegui conectar com o servidor local!")
+        print("   Certifique-se de que o servidor está rodando:")
+        print("   - Execute: python main.py")
+        print("   - Ou: docker run -p 8080:8080 occhio-local")
+        return False
     except Exception as e:
         print(f"❌ Erro no health check: {e}")
+        return False
+    
+    return True
 
 def test_analise_rapida(image_base64):
     """Testa análise rápida"""
@@ -55,7 +65,7 @@ def test_analise_rapida(image_base64):
     }
     
     try:
-        response = requests.post(f"{API_URL}/analise-rapida", json=payload)
+        response = requests.post(f"{API_URL}/analise-rapida", json=payload, timeout=30)
         result = response.json()
         
         if result.get("success"):
@@ -78,7 +88,7 @@ def test_perguntar(image_base64, pergunta):
     }
     
     try:
-        response = requests.post(f"{API_URL}/perguntar", json=payload)
+        response = requests.post(f"{API_URL}/perguntar", json=payload, timeout=30)
         result = response.json()
         
         if result.get("success"):
@@ -91,6 +101,37 @@ def test_perguntar(image_base64, pergunta):
     except Exception as e:
         print(f"❌ Erro na pergunta: {e}")
 
+def test_deteccoes_detalhadas(image_base64):
+    """Testa detecções detalhadas"""
+    print("\n🎯 Testando detecções detalhadas...")
+    
+    payload = {
+        "image_data": image_base64
+    }
+    
+    try:
+        response = requests.post(f"{API_URL}/deteccoes-detalhadas", json=payload, timeout=30)
+        result = response.json()
+        
+        if result.get("success"):
+            print("✅ Detecções Detalhadas - Sucesso!")
+            coordenadas = result.get('coordenadas', {})
+            print(f"👥 Faces detectadas: {len(coordenadas.get('faces', []))}")
+            print(f"📦 Objetos detectados: {len(coordenadas.get('objetos', []))}")
+            
+            # Mostrar detalhes das faces
+            for i, face in enumerate(coordenadas.get('faces', [])):
+                print(f"   👤 Face {i+1}: {face['nome']} (confiança: {face['confianca']:.2f})")
+            
+            # Mostrar detalhes dos objetos
+            for i, obj in enumerate(coordenadas.get('objetos', [])):
+                print(f"   📍 Objeto {i+1}: {obj.get('classe', 'N/A')} (confiança: {obj.get('confianca', 0):.2f})")
+        else:
+            print(f"❌ Erro: {result.get('error', 'Erro desconhecido')}")
+            
+    except Exception as e:
+        print(f"❌ Erro nas detecções detalhadas: {e}")
+
 def test_completo(image_base64, pergunta):
     """Testa endpoint completo"""
     print(f"\n🎯 Testando endpoint COMPLETO...")
@@ -101,7 +142,7 @@ def test_completo(image_base64, pergunta):
     }
     
     try:
-        response = requests.post(f"{API_URL}/completo", json=payload)
+        response = requests.post(f"{API_URL}/completo", json=payload, timeout=30)
         result = response.json()
         
         if result.get("success"):
@@ -123,52 +164,55 @@ def test_completo(image_base64, pergunta):
             
     except Exception as e:
         print(f"❌ Erro no endpoint completo: {e}")
+
+def test_processar(image_base64):
+    """Testa processamento completo"""
+    print("\n🔄 Testando processamento completo...")
+    
+    payload = {
+        "image_data": image_base64
+    }
+    
+    try:
+        response = requests.post(f"{API_URL}/processar", json=payload, timeout=30)
+        result = response.json()
         
-    def test_debug_deteccoes(image_base64):
-     """Testa para ver as detecções detalhadas"""
-     print("\n🔍 Debug - Detecções Detalhadas...")
-
-     payload = {
-         "image_data": image_base64
-     }
-
-     try:
-         response = requests.post(f"{API_URL}/deteccoes-detalhadas", json=payload)
-         result = response.json()
-
-         if result.get("success"):
-             print("✅ Detecções Detalhadas:")
-             coordenadas = result.get('coordenadas', {})
-
-             print(f"👥 Faces: {len(coordenadas.get('faces', []))}")
-             for face in coordenadas.get('faces', []):
-                 print(f"   - {face['nome']} (confiança: {face['confianca']:.2f})")
-
-             print(f"📦 Objetos: {len(coordenadas.get('objetos', []))}")
-             for obj in coordenadas.get('objetos', []):
-                 print(f"   - {obj['classe']} (confiança: {obj['confianca']:.2f})")
-         else:
-             print(f"❌ Erro: {result.get('error', 'Erro desconhecido')}")
-
-     except Exception as e:
-         print(f"❌ Erro nas detecções detalhadas: {e}")
-
-
-    test_debug_deteccoes(image_base64)
+        if result.get("success"):
+            print("✅ Processamento - Sucesso!")
+            analise = result.get('analise_rapida', {})
+            print(f"📝 Resposta: {analise.get('resposta', 'N/A')}")
+            
+            deteccoes = result.get('deteccoes_detalhadas', {})
+            coordenadas = deteccoes.get('coordenadas', {})
+            print(f"👥 Faces: {len(coordenadas.get('faces', []))}")
+            print(f"📦 Objetos: {len(coordenadas.get('objetos', []))}")
+        else:
+            print(f"❌ Erro: {result.get('error', 'Erro desconhecido')}")
+            
+    except Exception as e:
+        print(f"❌ Erro no processamento: {e}")
 
 def main():
     """Função principal"""
     print("=" * 60)
-    print("🎪 TESTADOR DA API OCCHIO CLOUD")
+    print("🎪 TESTADOR DA API OCCHIO CLOUD - SERVIDOR LOCAL")
+    print("=" * 60)
+    print(f"🌐 Conectando em: {API_URL}")
     print("=" * 60)
     
     # 1. Testar saúde da API
-    test_health()
+    if not test_health():
+        print("\n💡 DICA: Para iniciar o servidor local:")
+        print("   1. Terminal 1: python main.py")
+        print("   2. Terminal 2: python teste.py imagem.jpg")
+        print("   3. Ou usar Docker: docker run -p 8080:8080 occhio-local")
+        return
     
     # 2. Verificar se foi passada uma imagem
     if len(sys.argv) < 2:
-        print("\n📝 Uso: python testar_occhio.py <caminho_da_imagem>")
-        print("   Exemplo: python testar_occhio.py minha_foto.jpg")
+        print("\n📝 Uso: python teste.py <caminho_da_imagem>")
+        print("   Exemplo: python teste.py minha_foto.jpg")
+        print("\n💡 Certifique-se de que o servidor está rodando em outro terminal!")
         return
     
     image_path = sys.argv[1]
@@ -190,17 +234,24 @@ def main():
     
     # 5. Testar todos os endpoints
     test_analise_rapida(image_base64)
+    test_deteccoes_detalhadas(image_base64)
+    test_processar(image_base64)
     
     # Testar diferentes perguntas
     perguntas = [
-        "O ceu é azul?",
         "Quantas pessoas estão na foto?",
+        "O que tem nesta imagem?",
+        "Tem cadeiras na imagem?",
+        "Tem livros na imagem?",
+        "Tem carros na imagem?",
+        "O céu é azul?",
         "Descreva o ambiente",
-        "Tem algum objeto interessante?"
+        "Qual é o conteúdo desta imagem?"
     ]
     
     for pergunta in perguntas:
         test_perguntar(image_base64, pergunta)
+        time.sleep(1)  # Pequena pausa entre requisições
     
     # Testar endpoint completo
     test_completo(image_base64, "Descreva detalhadamente o que você vê")

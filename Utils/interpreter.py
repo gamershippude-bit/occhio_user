@@ -1,5 +1,5 @@
 """
-Interpreter - Versão Corrigida: Só menciona objetos específicos
+Interpreter - Versão FINAL: 100% Honesto
 """
 
 import logging
@@ -19,7 +19,7 @@ class Interpreter:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.client = None
 
-        # Lista de objetos relevantes (APENAS objetos que sabemos identificar)
+        # Lista de objetos relevantes
         self.objetos_relevantes = {
             'pessoas': ['person', 'people', 'human'],
             'móveis': ['chair', 'couch', 'sofa', 'bed', 'table', 'dining table', 'desk'],
@@ -28,13 +28,6 @@ class Interpreter:
             'animais': ['dog', 'cat', 'bird'],
             'veículos': ['car', 'bicycle', 'motorcycle'],
             'roupas': ['backpack', 'handbag', 'suitcase', 'tie', 'hat', 'shoe']
-        }
-        
-        # Objetos que devem ser IGNORADOS completamente
-        self.objetos_irrelevantes = {
-            'partes_corpo': ['hand', 'head', 'face', 'arm', 'leg', 'foot', 'finger', 'eye', 'nose', 'mouth'],
-            'elementos_cena': ['wall', 'floor', 'ceiling', 'sky', 'ground', 'tree', 'grass'],
-            'objetos_vagos': ['stuff', 'things', 'item', 'object', 'unknown', 'furniture', 'vehicle', 'pet']
         }
 
         if not self.api_key:
@@ -48,7 +41,7 @@ class Interpreter:
                 self.client = None
 
     def _filtrar_objetos_relevantes(self, objetos_detectados):
-        """Filtra objetos - APENAS os que sabemos identificar especificamente"""
+        """Filtra objetos - APENAS os que sabemos identificar"""
         if not objetos_detectados:
             return []
         
@@ -57,75 +50,12 @@ class Interpreter:
         for obj in objetos_detectados:
             obj_lower = obj.lower().strip()
             
-            # 1. PULAR objetos irrelevantes
-            irrelevante = False
-            for categoria, objetos in self.objetos_irrelevantes.items():
-                if obj_lower in objetos:
-                    irrelevante = True
-                    logger.debug(f"❌ Objeto irrelevante filtrado: {obj}")
-                    break
-            
-            if irrelevante:
-                continue
-                
-            # 2. INCLUIR APENAS objetos que sabemos identificar especificamente
-            relevante = False
             for categoria, objetos in self.objetos_relevantes.items():
                 if obj_lower in objetos:
-                    relevante = True
                     objetos_filtrados.append(obj)
-                    logger.debug(f"✅ Objeto relevante incluído: {obj}")
                     break
-            
-            # 3. IGNORAR completamente objetos não classificados
-            if not relevante:
-                logger.debug(f"🚫 Objeto desconhecido ignorado: {obj}")
         
         return objetos_filtrados
-
-    def _formatar_pessoas(self, faces_nomes):
-        """Formata pessoas de forma precisa"""
-        if not faces_nomes:
-            return "nenhuma pessoa"
-        
-        # Contar pessoas conhecidas e desconhecidas
-        conhecidos = [nome for nome in faces_nomes if nome and nome != "Desconhecido"]
-        total_pessoas = len(faces_nomes)
-        
-        if conhecidos:
-            nomes = ", ".join(conhecidos)
-            if len(conhecidos) == total_pessoas:
-                if total_pessoas == 1:
-                    return f"1 pessoa ({nomes})"
-                else:
-                    return f"{total_pessoas} pessoas ({nomes})"
-            else:
-                desconhecidos_count = total_pessoas - len(conhecidos)
-                return f"{nomes} e {desconhecidos_count} pessoa(s) não identificada(s)"
-        else:
-            # Apenas pessoas desconhecidas
-            if total_pessoas == 1:
-                return "1 pessoa"
-            else:
-                return f"{total_pessoas} pessoas"
-
-    def _formatar_objetos(self, objetos_detectados):
-        """Formata APENAS objetos específicos que sabemos identificar"""
-        if not objetos_detectados:
-            return "nenhum objeto específico"
-        
-        contador = Counter(objetos_detectados)
-        itens = []
-        
-        for obj, count in contador.items():
-            obj_formatado = self._traduzir_objeto(obj)
-            if count == 1:
-                itens.append(f"1 {obj_formatado}")
-            else:
-                plural = self._pluralizar_objeto(obj_formatado, count)
-                itens.append(f"{count} {plural}")
-        
-        return ", ".join(itens)
 
     def _traduzir_objeto(self, objeto_ingles):
         """Traduz objetos do inglês para português"""
@@ -167,30 +97,150 @@ class Interpreter:
             return objeto + 's'
 
     def responder_pergunta(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Gera respostas - APENAS menciona o que foi identificado especificamente"""
-        if not self.client:
-            return self._gerar_resposta_direta(objetos_detectados, faces_nomes)
-
+        """Gera respostas 100% honestas"""
+        logger.info(f"🔍 Interpreter recebendo - Pergunta: '{pergunta}'")
+        logger.info(f"🔍 Faces: {faces_nomes}")
+        logger.info(f"🔍 Objetos detectados: {objetos_detectados}")
+        
+        # Filtrar objetos
         objetos_filtrados = self._filtrar_objetos_relevantes(objetos_detectados)
+        
+        # Verificar se a pergunta é sobre a imagem
+        pergunta_lower = pergunta.lower()
+        
+        # Lista de palavras que indicam pergunta sobre a imagem
+        palavras_imagem = [
+            'pessoa', 'pessoas', 'gente', 'humano', 'humanos',
+            'cadeira', 'cadeiras', 'sofá', 'sofa', 'mesa', 'mesas', 
+            'cama', 'camas', 'livro', 'livros', 'carro', 'carros', 
+            'animal', 'animais', 'cachorro', 'gato', 'pássaro',
+            'objeto', 'objetos', 'coisa', 'coisas', 'item', 'itens',
+            'tem', 'tem alguma', 'tem algum', 'quantos', 'quantas', 
+            'o que tem', 'descreva', 'descrever', 'mostre', 'mostrar', 
+            'vejo', 'vê', 'enxerga', 'imagem', 'foto', 'fotografia',
+            'ambiente', 'cena', 'cenário'
+        ]
+        
+        # Lista de palavras que indicam pergunta geral (não sobre imagem)
+        palavras_gerais = [
+            'capital', 'horas', 'hora', 'tempo', 'clima', 'céu', 'ceu',
+            'nuvem', 'nuvens', 'azul', 'vermelho', 'verde', 'cor', 'cores',
+            'país', 'país', 'estado', 'cidade', 'presidente', 'governo',
+            'comida', 'bebida', 'água', 'agua', 'música', 'musica', 'filme'
+        ]
+        
+        # Decidir se é sobre imagem ou geral
+        eh_sobre_imagem = any(palavra in pergunta_lower for palavra in palavras_imagem)
+        eh_pergunta_geral = any(palavra in pergunta_lower for palavra in palavras_gerais)
+        
+        if eh_sobre_imagem:
+            # RESPOSTA CONTROLADA - sem OpenAI
+            resposta = self._gerar_resposta_controlada(objetos_filtrados, faces_nomes, pergunta)
+            logger.info(f"🎯 Resposta controlada: {resposta}")
+            return resposta
+        else:
+            # Pergunta geral - usar OpenAI
+            return self._responder_pergunta_geral(pergunta)
+
+    def _gerar_resposta_controlada(self, objetos_filtrados, faces_nomes, pergunta):
+        """Gera resposta CONTROLADA - 100% baseada nos dados reais"""
+        pergunta_lower = pergunta.lower()
+        
+        # Informações detectadas
+        total_pessoas = len(faces_nomes)
+        objetos_contador = Counter(objetos_filtrados)
+        
+        logger.info(f"🔍 Dados para resposta controlada:")
+        logger.info(f"   - Pessoas: {total_pessoas}")
+        logger.info(f"   - Objetos: {dict(objetos_contador)}")
+        
+        # PERGUNTAS SOBRE PESSOAS
+        if any(palavra in pergunta_lower for palavra in ['pessoa', 'pessoas', 'gente', 'quantas pessoas', 'quantas gente']):
+            if total_pessoas == 0:
+                return "Não detectei pessoas na imagem."
+            elif total_pessoas == 1:
+                return "Detectei 1 pessoa."
+            else:
+                return f"Detectei {total_pessoas} pessoas."
+        
+        # PERGUNTAS SOBRE OBJETOS ESPECÍFICOS
+        objetos_especificos = {
+            'chair': 'cadeira', 'couch': 'sofá', 'sofa': 'sofá', 
+            'bed': 'cama', 'table': 'mesa', 'book': 'livro', 
+            'car': 'carro', 'dog': 'cachorro', 'cat': 'gato', 
+            'bird': 'pássaro', 'laptop': 'laptop', 'computer': 'computador',
+            'tv': 'televisão', 'cell phone': 'celular', 'bottle': 'garrafa', 
+            'cup': 'copo', 'backpack': 'mochila'
+        }
+        
+        for obj_ingles, obj_portugues in objetos_especificos.items():
+            if obj_portugues in pergunta_lower:
+                quantidade = objetos_contador.get(obj_ingles, 0)
+                if quantidade == 0:
+                    return f"Não detectei {obj_portugues}s na imagem."
+                elif quantidade == 1:
+                    return f"Detectei 1 {obj_portugues}."
+                else:
+                    return f"Detectei {quantidade} {obj_portugues}s."
+        
+        # PERGUNTA GENÉRICA "O QUE TEM" ou "DESCREVA"
+        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'mostre', 'vejo', 'descrever', 'ambiente', 'cena']):
+            partes = []
+            
+            if total_pessoas > 0:
+                if total_pessoas == 1:
+                    partes.append("1 pessoa")
+                else:
+                    partes.append(f"{total_pessoas} pessoas")
+            
+            if objetos_contador:
+                for obj, count in objetos_contador.items():
+                    obj_traduzido = self._traduzir_objeto(obj)
+                    if count == 1:
+                        partes.append(f"1 {obj_traduzido}")
+                    else:
+                        plural = self._pluralizar_objeto(obj_traduzido, count)
+                        partes.append(f"{count} {plural}")
+            
+            if not partes:
+                return "Não detectei pessoas ou objetos específicos na imagem."
+            
+            # Juntar as partes de forma natural
+            if len(partes) == 1:
+                return f"Detectei {partes[0]}."
+            elif len(partes) == 2:
+                return f"Detectei {partes[0]} e {partes[1]}."
+            else:
+                return "Detectei " + ", ".join(partes[:-1]) + " e " + partes[-1] + "."
+        
+        # PERGUNTAS SOBRE CORES (não detectamos)
+        if any(palavra in pergunta_lower for palavra in ['cor', 'cores', 'azul', 'vermelho', 'verde', 'amarelo']):
+            return "Não posso detectar cores, apenas objetos e pessoas."
+        
+        # PERGUNTAS SOBRE CÉU/CLIMA (não detectamos)
+        if any(palavra in pergunta_lower for palavra in ['céu', 'ceu', 'nuvem', 'nuvens', 'clima', 'tempo']):
+            return "Não detectei informações sobre o céu ou clima na imagem."
+        
+        # FALLBACK - resposta direta baseada nos dados
+        return self._gerar_resposta_direta(objetos_filtrados, faces_nomes)
+
+    def _responder_pergunta_geral(self, pergunta):
+        """Responde perguntas gerais usando OpenAI"""
+        if not self.client:
+            return "Desculpe, não posso responder perguntas gerais no momento."
         
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "Você é um assistente visual para cegos. Descreva APENAS o que foi identificado COM CLAREZA.\n\n"
-                    "REGRAS:\n"
-                    "1. Mencione APENAS pessoas e objetos específicos identificados\n"
-                    "2. NUNCA mencione 'objetos', 'itens' ou 'coisas' genericamente\n"
-                    "3. Se não identificou objetos específicos, mencione APENAS as pessoas\n"
-                    "4. Seja PRECISO: '1 pessoa', '2 cadeiras'\n"
-                    "5. Máximo 2 frases\n"
+                    "Você é um assistente útil para pessoas com deficiência visual. "
+                    "Responda perguntas gerais de forma clara e direta em português. "
+                    "Seja conciso e objetivo."
                 )
             },
             {
                 "role": "user", 
-                "content": f"Pessoas: {self._formatar_pessoas(faces_nomes)}. "
-                          f"Objetos específicos: {self._formatar_objetos(objetos_filtrados) if objetos_filtrados else 'NENHUM'}. "
-                          f"Pergunta: {pergunta}"
+                "content": pergunta
             }
         ]
 
@@ -203,92 +253,46 @@ class Interpreter:
             )
             
             resposta = response.choices[0].message.content.strip()
-            return self._validar_resposta_rigorosa(resposta, objetos_filtrados)
+            logger.info(f"📥 Resposta geral do OpenAI: {resposta}")
+            return resposta
             
         except Exception as e:
-            logger.error(f"❌ Erro OpenAI: {e}")
-            return self._gerar_resposta_direta(objetos_detectados, faces_nomes)
-
-    def _validar_resposta_rigorosa(self, resposta, objetos_filtrados):
-        """Validação RIGOROSA"""
-        resposta_lower = resposta.lower()
-        
-        palavras_proibidas = [
-            'objeto', 'objetos', 'item', 'itens', 'coisa', 'coisas', 
-            'algo', 'alguma coisa', 'identificado', 'identificados'
-        ]
-        
-        if not objetos_filtrados:
-            for palavra in palavras_proibidas:
-                if palavra in resposta_lower:
-                    if 'pessoa' in resposta_lower or 'pessoas' in resposta_lower:
-                        if ' e ' in resposta:
-                            partes = resposta.split(' e ')
-                            for parte in partes:
-                                if 'pessoa' in parte.lower() or 'pessoas' in parte.lower():
-                                    resposta = parte.strip()
-                                    break
-                    else:
-                        resposta = "Não identifiquei nada específico no ambiente."
-                    break
-        
-        for palavra in palavras_proibidas:
-            if palavra in resposta_lower:
-                resposta = resposta.replace(palavra, '')
-                resposta = ' '.join(resposta.split())
-        
-        resposta = resposta.strip()
-        if resposta and not resposta.endswith(('.', '!', '?')):
-            resposta += '.'
-            
-        return resposta
+            logger.error(f"❌ Erro OpenAI em pergunta geral: {e}")
+            return "Desculpe, não consegui processar sua pergunta no momento."
 
     def _gerar_resposta_direta(self, objetos_detectados, faces_nomes):
-        """Fallback direto"""
+        """Fallback direto - honesto e simples"""
         objetos_filtrados = self._filtrar_objetos_relevantes(objetos_detectados)
         
         partes = []
         
         if faces_nomes:
-            conhecidos = [nome for nome in faces_nomes if nome and nome != "Desconhecido"]
             total_pessoas = len(faces_nomes)
-            
-            if conhecidos:
-                nomes = ", ".join(conhecidos)
-                if len(conhecidos) == total_pessoas:
-                    partes.append(f"Vejo {nomes}" if total_pessoas == 1 else f"Vejo {nomes}")
-                else:
-                    desconhecidos_count = total_pessoas - len(conhecidos)
-                    partes.append(f"Vejo {nomes} e {desconhecidos_count} pessoa(s) não identificada(s)")
+            if total_pessoas == 1:
+                partes.append("1 pessoa")
             else:
-                partes.append("Vejo 1 pessoa" if total_pessoas == 1 else f"Vejo {total_pessoas} pessoas")
-        else:
-            partes.append("Não vejo ninguém")
+                partes.append(f"{total_pessoas} pessoas")
         
         if objetos_filtrados:
             contador = Counter(objetos_filtrados)
-            objetos_desc = []
-            
             for obj, count in contador.items():
                 obj_traduzido = self._traduzir_objeto(obj)
                 if count == 1:
-                    objetos_desc.append(f"1 {obj_traduzido}")
+                    partes.append(f"1 {obj_traduzido}")
                 else:
                     plural = self._pluralizar_objeto(obj_traduzido, count)
-                    objetos_desc.append(f"{count} {plural}")
-            
-            if objetos_desc:
-                if partes and "não vejo ninguém" not in partes[0].lower():
-                    partes.append("e " + ", ".join(objetos_desc))
-                else:
-                    partes.append("Vejo " + ", ".join(objetos_desc))
+                    partes.append(f"{count} {plural}")
         
         if not partes:
-            return "Não identifiquei nada específico no ambiente."
+            return "Não detectei pessoas ou objetos específicos na imagem."
         
-        resposta = " ".join(partes) + "."
-        return self._validar_resposta_rigorosa(resposta, objetos_filtrados)
+        if len(partes) == 1:
+            return f"Detectei {partes[0]}."
+        elif len(partes) == 2:
+            return f"Detectei {partes[0]} e {partes[1]}."
+        else:
+            return "Detectei " + ", ".join(partes[:-1]) + " e " + partes[-1] + "."
 
     def descrever_ambiente(self, objetos_detectados=None, faces_nomes=None):
         """Descrição do ambiente"""
-        return self.responder_pergunta("Descreva o ambiente", objetos_detectados, faces_nomes)
+        return self.responder_pergunta("Descreva o que você vê nesta imagem", objetos_detectados, faces_nomes)
