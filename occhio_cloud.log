@@ -152,3 +152,18 @@
 2025-11-30 17:06:32,788 - Utils.interpreter - INFO - 🎯 Resposta controlada: Detectei 1 pessoa e 2 pessoas.
 2025-11-30 17:06:32,788 - Occhio-Cloud - INFO - 💬 Resposta inteligente: Detectei 1 pessoa e 2 pessoas.
 2025-11-30 17:06:33,474 - Occhio-Cloud - ERROR - ❌ Erro coordenadas objetos: 'YOLODetector' object has no attribute 'obter_coordenadas_objetos'
+2025-11-30 19:04:06,620 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud na porta 8080
+2025-11-30 19:04:06,632 - waitress - INFO - Serving on http://0.0.0.0:8080
+2025-11-30 19:04:53,105 - Occhio-Cloud - INFO - 🚀 Iniciando Occhio Cloud Backend
+2025-11-30 19:04:53,105 - Occhio-Cloud - INFO - 🔧 Inicializando detectores...
+2025-11-30 19:04:53,106 - Detectors.yolo_detector - INFO - Inicializando YOLO otimizado: yolov8n.pt
+2025-11-30 19:04:53,603 - Detectors.yolo_detector - INFO - ✅ YOLOv8 otimizado carregado
+2025-11-30 19:04:53,610 - Occhio-Cloud - INFO - ✅ YOLO inicializado com sucesso
+2025-11-30 19:04:53,610 - Detectors.face_detector - INFO - Detector de faces inicializado com sucesso.
+2025-11-30 19:04:53,610 - Occhio-Cloud - INFO - ✅ Face detector inicializado com sucesso
+2025-11-30 19:04:53,744 - occhio.db.database - INFO - ✅ Conexão com banco de dados estabelecida.
+2025-11-30 19:04:53,762 - occhio.db.database - INFO - 📊 Conectado ao banco: tcc_db
+2025-11-30 19:04:53,819 - Occhio-Cloud - INFO - ✅ Banco inicializado com sucesso
+2025-11-30 19:04:54,189 - Utils.interpreter - INFO - ✅ Cliente OpenAI configurado para gpt-4o-mini
+2025-11-30 19:04:54,189 - Occhio-Cloud - INFO - ✅ Interpreter OK - Nova Versão com Endpoints
+2025-11-30 19:04:54,189 - Occhio-Cloud - INFO - 🎉 Occhio Cloud inicializado com sucesso!

@@ -1,6 +1,6 @@
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
-VERSÃO CLOUD/API - Endpoints completos para processamento de imagens
+VERSÃO CLOUD/API - Endpoints completos baseados no novo interpreter
 """
 
 import cv2
@@ -40,31 +40,8 @@ app = Flask(__name__)
 _occhio_instance = None
 _initialization_lock = threading.Lock()
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Endpoint de saúde MUITO simples"""
-    return jsonify({
-        "status": "healthy", 
-        "service": "Occhio Cloud",
-        "timestamp": time.time()
-    })
-
-@app.route('/health-simple', methods=['GET'])
-def health_check_simple():
-    """Endpoint de saúde SUPER simples"""
-    return "OK", 200
-
-@app.route('/ready', methods=['GET'])
-def ready_check():
-    """Endpoint de readiness - verifica se sistema está inicializado"""
-    global _occhio_instance
-    if _occhio_instance is not None:
-        return jsonify({"status": "ready", "initialized": True})
-    else:
-        return jsonify({"status": "initializing", "initialized": False}), 503
-
 class OcchioCloud:
-    """Classe otimizada para cloud - apenas processamento de imagens via API"""
+    """Classe otimizada para cloud - com novos endpoints baseados no interpreter"""
 
     def __init__(self, api_key=None):
         try:
@@ -99,10 +76,10 @@ class OcchioCloud:
                 logger.error(f"❌ Erro Banco: {e}")
                 self.db = None
 
-            # Interpreter - COM A CORREÇÃO
+            # Interpreter - NOVA VERSÃO
             try:
                 self.interpreter = Interpreter(api_key=api_key)
-                logger.info("✅ Interpreter OK - Versão Corrigida")
+                logger.info("✅ Interpreter OK - Nova Versão com Endpoints")
             except Exception as e:
                 logger.error(f"❌ Erro Interpreter: {e}")
                 self.interpreter = None
@@ -188,147 +165,205 @@ class OcchioCloud:
             logger.error(f"❌ Erro ao decodificar imagem: {e}")
             raise
 
-    def processar_analise_rapida(self, image_data):
+    def _obter_deteccoes_detalhadas(self, frame):
+        """Obtém detecções detalhadas para os novos endpoints"""
+        deteccoes = {
+            "objetos": [],
+            "faces": []
+        }
+        
+        # Detecção de objetos com YOLO
+        if self.detector_objetos:
+            try:
+                # Usar método que retorna bounding boxes
+                if hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                    objetos_com_bbox = self.detector_objetos.detectar_com_bbox(frame)
+                    for obj in objetos_com_bbox:
+                        deteccoes["objetos"].append({
+                            'name': obj.get('class', 'desconhecido'),
+                            'confidence': obj.get('confidence', 0.5),
+                            'bbox': obj.get('bbox', {})
+                        })
+                else:
+                    # Fallback para método rápido
+                    objetos, _ = self.detector_objetos.detectar_objetos_rapido(frame)
+                    for obj in objetos:
+                        deteccoes["objetos"].append({
+                            'name': obj,
+                            'confidence': 0.7,
+                            'bbox': {'x': 0, 'y': 0, 'width': 100, 'height': 100}
+                        })
+            except Exception as e:
+                logger.error(f"❌ Erro detecção objetos: {e}")
+
+        # Detecção de faces
+        if self.detector_faces:
+            try:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                
+                for i, (top, right, bottom, left) in enumerate(face_locations):
+                    name = "Desconhecido"
+                    confidence = 0.0
+                    
+                    if i < len(face_encodings) and hasattr(self.detector_faces, 'known_face_encodings'):
+                        face_distances = face_recognition.face_distance(
+                            self.detector_faces.known_face_encodings, face_encodings[i]
+                        )
+                        
+                        if len(face_distances) > 0:
+                            best_match_index = np.argmin(face_distances)
+                            best_distance = face_distances[best_match_index]
+                            confidence = max(0, 1 - best_distance)
+                            
+                            if best_distance <= 0.6:
+                                name = self.detector_faces.known_face_names[best_match_index]
+                    
+                    deteccoes["faces"].append({
+                        'name': name,
+                        'confidence': float(confidence),
+                        'bbox': {
+                            'x': int(left),
+                            'y': int(top),
+                            'width': int(right - left),
+                            'height': int(bottom - top)
+                        }
+                    })
+                    
+            except Exception as e:
+                logger.error(f"❌ Erro detecção faces: {e}")
+
+        return deteccoes
+
+    # ========== NOVOS ENDPOINTS BASEADOS NO INTERPRETER ==========
+
+    def endpoint_processar(self, image_data):
         """
-        FASE 1: Processamento rápido para análise textual
+        Endpoint /processar - Processa imagem e retorna detecções com coordenadas
         """
         try:
             frame = self._decode_image(image_data)
-            deteccoes = self._processar_deteccoes_rapidas(frame)
+            deteccoes = self._obter_deteccoes_detalhadas(frame)
             
-            # Gerar resposta textual
-            resposta_texto = self._gerar_resposta_textual_rapida(deteccoes)
+            if not self.interpreter:
+                return {
+                    "success": False,
+                    "error": "Interpreter não disponível",
+                    "timestamp": time.time()
+                }
             
-            return {
-                "success": True,
-                "resposta": resposta_texto,
-                "deteccoes_basicas": {
-                    "total_faces": deteccoes["total_faces"],
-                    "total_objetos": deteccoes["total_objetos"],
-                    "faces_conhecidas": deteccoes["faces_conhecidas"]
-                },
-                "timestamp": time.time()
-            }
+            # Usar o novo método do interpreter
+            resultado = self.interpreter.processar_deteccoes(
+                objetos_detectados=deteccoes["objetos"],
+                faces_detectadas=deteccoes["faces"]
+            )
+            
+            return resultado
             
         except Exception as e:
-            logger.error(f"❌ Erro análise rápida: {e}")
+            logger.error(f"❌ Erro endpoint_processar: {e}")
             return {
                 "success": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
 
-    def processar_deteccoes_detalhadas(self, image_data):
+    def endpoint_perguntar(self, image_data, pergunta):
         """
-        FASE 2: Processamento detalhado para coordenadas
+        Endpoint /perguntar - Responde pergunta com correlação com imagem
         """
         try:
             frame = self._decode_image(image_data)
-            coordenadas = self._obter_coordenadas_detalhadas(frame)
+            deteccoes = self._obter_deteccoes_detalhadas(frame)
             
-            return {
-                "success": True,
-                "coordenadas": coordenadas,
-                "timestamp": time.time()
-            }
+            if not self.interpreter:
+                return {
+                    "success": False,
+                    "error": "Interpreter não disponível",
+                    "timestamp": time.time()
+                }
+            
+            # Extrair nomes das faces para o interpreter
+            faces_nomes = [face['name'] for face in deteccoes["faces"]]
+            
+            # Usar o novo método do interpreter
+            resultado = self.interpreter.perguntar_sobre_imagem(
+                pergunta=pergunta,
+                objetos_detectados=deteccoes["objetos"],
+                faces_nomes=faces_nomes
+            )
+            
+            return resultado
             
         except Exception as e:
-            logger.error(f"❌ Erro detecções detalhadas: {e}")
+            logger.error(f"❌ Erro endpoint_perguntar: {e}")
             return {
                 "success": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
 
-    def processar_completo(self, image_data):
+    def endpoint_estatistica(self, image_data):
         """
-        Processamento completo: análise rápida + coordenadas
+        Endpoint /estatistica - Retorna estatísticas detalhadas
         """
         try:
             frame = self._decode_image(image_data)
+            deteccoes = self._obter_deteccoes_detalhadas(frame)
             
-            # Processar ambas as fases
-            deteccoes_rapidas = self._processar_deteccoes_rapidas(frame)
-            coordenadas = self._obter_coordenadas_detalhadas(frame)
-            resposta_texto = self._gerar_resposta_textual_rapida(deteccoes_rapidas)
+            if not self.interpreter:
+                return {
+                    "success": False,
+                    "error": "Interpreter não disponível",
+                    "timestamp": time.time()
+                }
             
-            return {
-                "success": True,
-                "analise_rapida": {
-                    "resposta": resposta_texto,
-                    "deteccoes_basicas": {
-                        "total_faces": deteccoes_rapidas["total_faces"],
-                        "total_objetos": deteccoes_rapidas["total_objetos"],
-                        "faces_conhecidas": deteccoes_rapidas["faces_conhecidas"]
-                    }
-                },
-                "deteccoes_detalhadas": {
-                    "coordenadas": coordenadas
-                },
-                "timestamp": time.time()
-            }
+            # Usar o novo método do interpreter
+            resultado = self.interpreter.obter_estatisticas(
+                objetos_detectados=deteccoes["objetos"],
+                faces_detectadas=deteccoes["faces"]
+            )
+            
+            return resultado
             
         except Exception as e:
-            logger.error(f"❌ Erro processamento completo: {e}")
+            logger.error(f"❌ Erro endpoint_estatistica: {e}")
             return {
                 "success": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
 
-    def responder_pergunta(self, image_data, pergunta):
+    def endpoint_completo(self, image_data, pergunta=None):
         """
-        Responde uma pergunta específica sobre a imagem usando o interpreter CORRIGIDO
+        Endpoint /completo - Junta todos os processamentos
         """
         try:
             frame = self._decode_image(image_data)
+            deteccoes = self._obter_deteccoes_detalhadas(frame)
             
-            # Obter detecções COMPLETAS para o interpreter
-            coordenadas = self._obter_coordenadas_detalhadas(frame)
-            
-            # Preparar dados para o interpreter CORRIGIDO
-            faces_nomes = []
-            objetos_detectados = []
+            if not self.interpreter:
+                return {
+                    "success": False,
+                    "error": "Interpreter não disponível",
+                    "timestamp": time.time()
+                }
             
             # Extrair nomes das faces
-            for face in coordenadas.get("faces", []):
-                if face["nome"] != "Desconhecido":
-                    faces_nomes.append(face["nome"])
-                else:
-                    faces_nomes.append("Desconhecido")
+            faces_nomes = [face['name'] for face in deteccoes["faces"]]
             
-            # Extrair objetos DETALHADOS (nomes das classes)
-            for obj in coordenadas.get("objetos", []):
-                objetos_detectados.append(obj["classe"])
+            # Usar o novo método do interpreter
+            resultado = self.interpreter.processamento_completo(
+                objetos_detectados=deteccoes["objetos"],
+                faces_detectadas=deteccoes["faces"],
+                pergunta=pergunta
+            )
             
-            # DEBUG: Log dos dados enviados para o interpreter
-            logger.info(f"🔍 Dados para interpreter - Pergunta: '{pergunta}'")
-            logger.info(f"🔍 Faces: {faces_nomes}")
-            logger.info(f"🔍 Objetos: {objetos_detectados}")
-            
-            # Usar interpreter CORRIGIDO para resposta inteligente
-            if self.interpreter:
-                resposta = self.interpreter.responder_pergunta(pergunta, objetos_detectados, faces_nomes)
-                logger.info(f"💬 Resposta do interpreter: {resposta}")
-            else:
-                # Fallback para resposta básica
-                deteccoes_rapidas = self._processar_deteccoes_rapidas(frame)
-                resposta = self._gerar_resposta_textual_rapida(deteccoes_rapidas)
-            
-            return {
-                "success": True,
-                "pergunta": pergunta,
-                "resposta": resposta,
-                "deteccoes": {
-                    "faces": len(faces_nomes),
-                    "objetos": len(objetos_detectados),
-                    "faces_conhecidas": len([nome for nome in faces_nomes if nome != "Desconhecido"])
-                },
-                "timestamp": time.time()
-            }
+            return resultado
             
         except Exception as e:
-            logger.error(f"❌ Erro ao responder pergunta: {e}")
+            logger.error(f"❌ Erro endpoint_completo: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -359,156 +394,6 @@ class OcchioCloud:
                 "error": str(e)
             }
 
-    def _processar_deteccoes_rapidas(self, frame):
-        """Processa detecções de forma otimizada para velocidade"""
-        deteccoes = {
-            "total_faces": 0,
-            "total_objetos": 0,
-            "faces_conhecidas": 0
-        }
-        
-        # Detecção rápida de faces
-        if self.detector_faces and hasattr(self.detector_faces, 'known_face_encodings'):
-            try:
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                face_locations = face_recognition.face_locations(rgb_frame, model="hog", number_of_times_to_upsample=0)
-                
-                conhecidos = 0
-                if face_locations and self.detector_faces.known_face_encodings:
-                    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-                    
-                    for face_encoding in face_encodings:
-                        face_distances = face_recognition.face_distance(
-                            self.detector_faces.known_face_encodings, face_encoding
-                        )
-                        
-                        if len(face_distances) > 0:
-                            best_distance = np.min(face_distances)
-                            if best_distance <= 0.6:
-                                conhecidos += 1
-                
-                deteccoes["total_faces"] = len(face_locations)
-                deteccoes["faces_conhecidas"] = conhecidos
-                
-            except Exception as e:
-                logger.error(f"❌ Erro detecção rápida faces: {e}")
-
-        # Detecção rápida de objetos
-        if self.detector_objetos:
-            try:
-                objetos_detectados, _ = self.detector_objetos.detectar_objetos_rapido(frame)
-                deteccoes["total_objetos"] = len(objetos_detectados)
-            except Exception as e:
-                logger.error(f"❌ Erro detecção rápida objetos: {e}")
-
-        return deteccoes
-
-    def _obter_coordenadas_detalhadas(self, frame):
-        """Obtém coordenadas detalhadas para desenhar caixas"""
-        coordenadas = {
-            "faces": [],
-            "objetos": []
-        }
-        
-        # Coordenadas das faces
-        if self.detector_faces and hasattr(self.detector_faces, 'known_face_encodings'):
-            try:
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                face_locations = face_recognition.face_locations(rgb_frame, model="hog")
-                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-                
-                for i, (top, right, bottom, left) in enumerate(face_locations):
-                    name = "Desconhecido"
-                    confidence = 0.0
-                    
-                    if i < len(face_encodings) and self.detector_faces.known_face_encodings:
-                        face_distances = face_recognition.face_distance(
-                            self.detector_faces.known_face_encodings, face_encodings[i]
-                        )
-                        
-                        if len(face_distances) > 0:
-                            best_match_index = np.argmin(face_distances)
-                            best_distance = face_distances[best_match_index]
-                            confidence = max(0, 1 - best_distance)
-                            
-                            if best_distance <= 0.6:
-                                name = self.detector_faces.known_face_names[best_match_index]
-                    
-                    coordenadas["faces"].append({
-                        "nome": name,
-                        "confianca": float(confidence),
-                        "caixa": {
-                            "x1": int(left),
-                            "y1": int(top),
-                            "x2": int(right),
-                            "y2": int(bottom)
-                        }
-                    })
-                    
-            except Exception as e:
-                logger.error(f"❌ Erro coordenadas faces: {e}")
-
-        # Coordenadas dos objetos - CORRIGIDO
-        if self.detector_objetos:
-            try:
-                # Usar o método que realmente retorna coordenadas
-                objetos_detalhados = self.detector_objetos.obter_coordenadas_objetos(frame)
-                
-                # Se não retornou nada, tentar método alternativo
-                if not objetos_detalhados:
-                    objetos_detectados, confiancas = self.detector_objetos.detectar_objetos_rapido(frame)
-                    for i, obj in enumerate(objetos_detectados):
-                        coordenadas["objetos"].append({
-                            "classe": obj,
-                            "confianca": float(confiancas.get(obj, 0.5)),
-                            "caixa": {
-                                "x1": 0, "y1": 0, "x2": 100, "y2": 100  # Placeholder
-                            }
-                        })
-                else:
-                    coordenadas["objetos"] = objetos_detalhados
-                    
-                logger.info(f"📦 Objetos detectados: {len(coordenadas['objetos'])}")
-                
-            except Exception as e:
-                logger.error(f"❌ Erro coordenadas objetos: {e}")
-                # Fallback básico
-                try:
-                    objetos_detectados, _ = self.detector_objetos.detectar_objetos_rapido(frame)
-                    for obj in objetos_detectados:
-                        coordenadas["objetos"].append({
-                            "classe": obj,
-                            "confianca": 0.7,
-                            "caixa": {"x1": 0, "y1": 0, "x2": 100, "y2": 100}
-                        })
-                except:
-                    pass
-
-        return coordenadas
-
-    def _gerar_resposta_textual_rapida(self, deteccoes):
-        """Gera resposta textual rápida"""
-        total_faces = deteccoes["total_faces"]
-        total_objetos = deteccoes["total_objetos"]
-        faces_conhecidas = deteccoes["faces_conhecidas"]
-        
-        if total_faces == 0 and total_objetos == 0:
-            return "Não detectei pessoas ou objetos significativos no ambiente."
-        
-        partes = []
-        
-        if total_faces > 0:
-            if faces_conhecidas > 0:
-                partes.append(f"{faces_conhecidas} pessoa(s) conhecida(s)")
-            desconhecidos = total_faces - faces_conhecidas
-            if desconhecidos > 0:
-                partes.append(f"{desconhecidos} pessoa(s) não identificada(s)")
-        
-        if total_objetos > 0:
-            partes.append(f"{total_objetos} objeto(s) detectado(s)")
-        
-        return "Vejo " + ", ".join(partes) + "."
-
 # Singleton para a instância
 def get_occhio_instance():
     global _occhio_instance
@@ -534,12 +419,69 @@ def initialize_occhio():
     except Exception as e:
         logger.error(f"❌ Erro na inicialização: {e}")
 
-# ================== ENDPOINTS ==================
+# ================== ENDPOINTS PRINCIPAIS ==================
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check simples"""
+    return jsonify({
+        "service": "Occhio Cloud",
+        "status": "healthy", 
+        "timestamp": time.time()
+    })
+
+@app.route('/health-completo', methods=['GET'])
+def health_completo():
+    """Health check completo do sistema"""
+    try:
+        occhio = get_occhio_instance()
+        resultado = occhio.obter_estatisticas_sistema()
+        return jsonify(resultado)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "status": "unhealthy"
+        }), 500
+
+@app.route('/ready', methods=['GET'])
+def ready_check():
+    """Endpoint de readiness"""
+    global _occhio_instance
+    if _occhio_instance is not None:
+        return jsonify({"status": "ready", "initialized": True})
+    else:
+        return jsonify({"status": "initializing", "initialized": False}), 503
+
+# ================== NOVOS ENDPOINTS BASEADOS NO INTERPRETER ==================
+
+@app.route('/processar', methods=['POST'])
+def processar():
+    """
+    Endpoint /processar - Processa imagem e retorna detecções com coordenadas
+    """
+    try:
+        occhio = get_occhio_instance()
+        
+        if 'image' not in request.files and 'image_data' not in request.json:
+            return jsonify({"success": False, "error": "Nenhuma imagem fornecida"}), 400
+        
+        if 'image' in request.files:
+            image_data = request.files['image'].read()
+        else:
+            image_data = request.json['image_data']
+        
+        resultado = occhio.endpoint_processar(image_data)
+        return jsonify(resultado)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro endpoint /processar: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/perguntar', methods=['POST'])
 def perguntar():
     """
-    Endpoint para fazer pergunta sobre uma imagem
+    Endpoint /perguntar - Responde pergunta com correlação com imagem
     """
     try:
         occhio = get_occhio_instance()
@@ -555,40 +497,17 @@ def perguntar():
             return jsonify({"success": False, "error": "Forneça image_data"}), 400
         
         logger.info(f"❓ Nova pergunta: '{pergunta}'")
-        resultado = occhio.responder_pergunta(image_data, pergunta)
+        resultado = occhio.endpoint_perguntar(image_data, pergunta)
         return jsonify(resultado)
         
     except Exception as e:
         logger.error(f"❌ Erro endpoint /perguntar: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-@app.route('/processar', methods=['POST'])
-def processar():
+@app.route('/estatistica', methods=['POST'])
+def estatistica():
     """
-    Processa imagem e retorna análise completa
-    """
-    try:
-        occhio = get_occhio_instance()
-        
-        if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"success": False, "error": "Nenhuma imagem fornecida"}), 400
-        
-        if 'image' in request.files:
-            image_data = request.files['image'].read()
-        else:
-            image_data = request.json['image_data']
-        
-        resultado = occhio.processar_completo(image_data)
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /processar: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/analise-rapida', methods=['POST'])
-def analise_rapida():
-    """
-    FASE 1: Retorna análise textual rapidamente
+    Endpoint /estatistica - Retorna estatísticas detalhadas da imagem
     """
     try:
         occhio = get_occhio_instance()
@@ -601,54 +520,17 @@ def analise_rapida():
         else:
             image_data = request.json['image_data']
         
-        resultado = occhio.processar_analise_rapida(image_data)
+        resultado = occhio.endpoint_estatistica(image_data)
         return jsonify(resultado)
         
     except Exception as e:
-        logger.error(f"❌ Erro endpoint /analise-rapida: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/deteccoes-detalhadas', methods=['POST'])
-def deteccoes_detalhadas():
-    """
-    FASE 2: Retorna coordenadas para desenhar caixas
-    """
-    try:
-        occhio = get_occhio_instance()
-        
-        if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"success": False, "error": "Nenhuma imagem fornecida"}), 400
-        
-        if 'image' in request.files:
-            image_data = request.files['image'].read()
-        else:
-            image_data = request.json['image_data']
-        
-        resultado = occhio.processar_deteccoes_detalhadas(image_data)
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /deteccoes-detalhadas: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/estatisticas', methods=['GET'])
-def estatisticas():
-    """
-    Retorna estatísticas do sistema
-    """
-    try:
-        occhio = get_occhio_instance()
-        resultado = occhio.obter_estatisticas_sistema()
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /estatisticas: {e}")
+        logger.error(f"❌ Erro endpoint /estatistica: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/completo', methods=['POST'])
 def completo():
     """
-    Endpoint que engloba tudo: análise rápida + coordenadas + resposta inteligente CORRIGIDA
+    Endpoint /completo - Junta todos os processamentos
     """
     try:
         occhio = get_occhio_instance()
@@ -662,42 +544,48 @@ def completo():
         else:
             image_data = request.json['image_data']
         
-        pergunta = request.json.get('pergunta', 'Descreva o que você vê nesta imagem')
+        pergunta = request.json.get('pergunta')
         
-        logger.info(f"🎯 Endpoint COMPLETO - Pergunta: '{pergunta}'")
+        logger.info(f"🎯 Endpoint COMPLETO - Pergunta: {pergunta}")
         
-        # Usar interpreter CORRIGIDO para resposta inteligente
-        if occhio.interpreter:
-            frame = occhio._decode_image(image_data)
-            coordenadas = occhio._obter_coordenadas_detalhadas(frame)
-            
-            faces_nomes = [face["nome"] for face in coordenadas.get("faces", [])]
-            objetos_detectados = [obj["classe"] for obj in coordenadas.get("objetos", [])]
-            
-            logger.info(f"🔍 Dados para interpreter - Faces: {faces_nomes}, Objetos: {objetos_detectados}")
-            
-            # USANDO O INTERPRETER CORRIGIDO
-            resposta_inteligente = occhio.interpreter.responder_pergunta(pergunta, objetos_detectados, faces_nomes)
-            logger.info(f"💬 Resposta inteligente: {resposta_inteligente}")
-        else:
-            resposta_inteligente = "Interpreter não disponível"
-        
-        # Processar análise completa
-        resultado_completo = occhio.processar_completo(image_data)
-        if not resultado_completo['success']:
-            return jsonify(resultado_completo)
-        
-        return jsonify({
-            "success": True,
-            "pergunta": pergunta,
-            "resposta_inteligente": resposta_inteligente,
-            "analise_rapida": resultado_completo['analise_rapida'],
-            "deteccoes_detalhadas": resultado_completo['deteccoes_detalhadas'],
-            "timestamp": time.time()
-        })
+        resultado = occhio.endpoint_completo(image_data, pergunta)
+        return jsonify(resultado)
         
     except Exception as e:
         logger.error(f"❌ Erro endpoint /completo: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/estatisticas-sistema', methods=['GET'])
+def estatisticas_sistema():
+    """
+    Retorna estatísticas do sistema (legado - mantido para compatibilidade)
+    """
+    try:
+        occhio = get_occhio_instance()
+        resultado = occhio.obter_estatisticas_sistema()
+        return jsonify(resultado)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro endpoint /estatisticas-sistema: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ================== ENDPOINTS DE COMPATIBILIDADE (opcionais) ==================
+
+@app.route('/analise-rapida', methods=['POST'])
+def analise_rapida():
+    """Endpoint legado para compatibilidade"""
+    try:
+        # Redirecionar para /perguntar com pergunta padrão
+        data = request.json if request.json else {}
+        data['pergunta'] = "Descreva o que você vê nesta imagem"
+        
+        # Criar uma requisição fake para o endpoint perguntar
+        from flask import copy_current_request_context
+        with copy_current_request_context():
+            return perguntar()
+            
+    except Exception as e:
+        logger.error(f"❌ Erro endpoint /analise-rapida: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 def iniciar_servidor():
