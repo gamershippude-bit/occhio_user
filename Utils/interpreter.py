@@ -1,5 +1,5 @@
 """
-Interpreter - Versão COMPLETA: Todos os endpoints necessários
+Interpreter - Versão CORRIGIDA: Todos os endpoints necessários
 """
 
 import logging
@@ -35,7 +35,7 @@ class Interpreter:
             logger.warning("⚠️ OPENAI_API_KEY não encontrada")
         else:
             try:
-                self.client = OpenAI(api_key=self.api_key)
+                self.client = OpenAI(api_key=self.api_key)  # CORREÇÃO: removido proxies
                 logger.info(f"✅ Cliente OpenAI configurado para {self.model_name}")
             except Exception as e:
                 logger.error(f"❌ Falha ao inicializar cliente OpenAI: {e}")
@@ -128,24 +128,24 @@ class Interpreter:
         
         start_time = time.time()
         
-        # Classificar se a pergunta é sobre a imagem
+        # Classificar se a pergunta é sobre a imagem - CORREÇÃO: melhor prompt
         tipo_pergunta = self._classificar_pergunta(pergunta)
         
         # Filtrar objetos relevantes
         objetos_filtrados = self._filtrar_objetos_relevantes(
             [obj.get('name', '') for obj in (objetos_detectados or [])]
-        )
+        ) if objetos_detectados else []
         
         if tipo_pergunta == "imagem":
             # Resposta baseada na imagem
-            resposta_imagem = self._gerar_resposta_sobre_imagem(pergunta, objetos_filtrados, faces_nomes)
+            resposta_imagem = self._gerar_resposta_sobre_imagem(pergunta, objetos_filtrados, faces_nomes or [])
             correlacao = True
             dados_utilizados = self._formatar_dados_para_resposta(len(faces_nomes or []), Counter(objetos_filtrados))
         else:
             # Resposta geral
             resposta_imagem = self._responder_pergunta_geral(pergunta)
             correlacao = False
-            dados_utilizados = None
+            dados_utilizados = "Pergunta geral - sem dados da imagem"
         
         processing_time = time.time() - start_time
         
@@ -156,7 +156,7 @@ class Interpreter:
             'pergunta': pergunta,
             'correlacao_com_imagem': correlacao,
             'resposta': resposta_imagem,
-            'dados_utilizados': dados_utilizados if correlacao else "Pergunta geral - sem dados da imagem"
+            'dados_utilizados': dados_utilizados
         }
         
         logger.info(f"✅ Pergunta processada - Correlação: {correlacao}")
@@ -309,16 +309,21 @@ class Interpreter:
     def _classificar_pergunta(self, pergunta):
         """Usa ChatGPT para classificar se a pergunta é sobre a imagem ou geral"""
         if not self.client:
-            return "geral"
+            return "imagem"  # CORREÇÃO: fallback para imagem (mais comum)
             
         messages = [
             {
                 "role": "system",
-                "content": "Classifique como 'imagem' ou 'geral'. Responda APENAS com uma palavra."
+                "content": (
+                    "Classifique se a pergunta é sobre o conteúdo visual de uma IMAGEM ou é uma pergunta GERAL.\n"
+                    "IMAGEM = pergunta sobre objetos, pessoas, cena, ambiente, descrição visual, conteúdo da foto\n" 
+                    "GERAL = pergunta sobre conhecimento, fatos, conceitos abstratos não relacionados a imagens\n"
+                    "RESPONDA APENAS COM 'imagem' OU 'geral'"
+                )
             },
             {
                 "role": "user", 
-                "content": f"Classifique: '{pergunta}'"
+                "content": f"Classifique esta pergunta: '{pergunta}'"
             }
         ]
 
@@ -327,21 +332,25 @@ class Interpreter:
                 model=self.model_name,
                 messages=messages,
                 max_tokens=10,
-                temperature=0.1,
+                temperature=0.0,  # CORREÇÃO: temperatura zero para consistência
             )
             
             classificacao = response.choices[0].message.content.strip().lower()
+            logger.info(f"🔍 ChatGPT classificou '{pergunta}' como: {classificacao}")
+            
             return "imagem" if "imagem" in classificacao else "geral"
             
         except Exception as e:
             logger.error(f"❌ Erro ao classificar pergunta: {e}")
-            return "geral"
+            return "imagem"  # CORREÇÃO: fallback para imagem
 
     def _gerar_resposta_sobre_imagem(self, pergunta, objetos_filtrados, faces_nomes):
         """Gera resposta sobre a imagem baseada nos dados detectados"""
         objetos_contador = Counter(objetos_filtrados)
         total_pessoas_faces = len(faces_nomes or [])
         objetos_sem_pessoas = {obj: count for obj, count in objetos_contador.items() if obj != 'person'}
+        
+        logger.info(f"🔍 Dados para resposta: {total_pessoas_faces} pessoas, {dict(objetos_sem_pessoas)} objetos")
         
         if total_pessoas_faces == 0 and not objetos_sem_pessoas:
             return "Não detectei pessoas ou objetos específicos nesta imagem."
@@ -352,11 +361,17 @@ class Interpreter:
             messages = [
                 {
                     "role": "system",
-                    "content": "Responda baseado APENAS nos dados fornecidos. Seja honesto e use português."
+                    "content": (
+                        "Você é um assistente para pessoas com deficiência visual. "
+                        "Responda a pergunta baseado APENAS nos dados fornecidos sobre a imagem. "
+                        "Seja 100% honesto e direto. Use apenas português. "
+                        "NUNCA invente informações que não estão nos dados. "
+                        "Seja útil e claro para quem não pode ver a imagem."
+                    )
                 },
                 {
                     "role": "user", 
-                    "content": f"Pergunta: '{pergunta}'\nDados: {dados_detectados}\nResposta:"
+                    "content": f"Pergunta: '{pergunta}'\n\nDados detectados na imagem:\n{dados_detectados}\n\nResposta baseada APENAS nos dados acima:"
                 }
             ]
 
@@ -367,10 +382,13 @@ class Interpreter:
                     max_tokens=150,
                     temperature=0.1,
                 )
-                return response.choices[0].message.content.strip()
+                resposta = response.choices[0].message.content.strip()
+                logger.info(f"💬 Resposta gerada: {resposta}")
+                return resposta
             except Exception as e:
                 logger.error(f"❌ Erro ao gerar resposta: {e}")
         
+        # Fallback
         return self._gerar_resposta_direta_honesta(total_pessoas_faces, objetos_sem_pessoas)
 
     def _formatar_dados_para_chatgpt(self, total_pessoas, objetos_contador):
@@ -378,11 +396,17 @@ class Interpreter:
         partes = []
         
         if total_pessoas > 0:
-            partes.append(f"{total_pessoas} pessoa{'s' if total_pessoas > 1 else ''}")
+            if total_pessoas == 1:
+                partes.append("1 pessoa")
+            else:
+                partes.append(f"{total_pessoas} pessoas")
         
         for obj, count in objetos_contador.items():
             obj_traduzido = self._traduzir_objeto(obj)
-            partes.append(f"{count} {obj_traduzido}{'s' if count > 1 else ''}")
+            if count == 1:
+                partes.append(f"1 {obj_traduzido}")
+            else:
+                partes.append(f"{count} {obj_traduzido}s")
         
         return ", ".join(partes) if partes else "nada detectado"
 
@@ -403,16 +427,27 @@ class Interpreter:
         partes = []
         
         if total_pessoas > 0:
-            partes.append(f"{total_pessoas} pessoa{'s' if total_pessoas > 1 else ''}")
+            if total_pessoas == 1:
+                partes.append("1 pessoa")
+            else:
+                partes.append(f"{total_pessoas} pessoas")
         
         for obj, count in objetos_contador.items():
             obj_traduzido = self._traduzir_objeto(obj)
-            partes.append(f"{count} {obj_traduzido}{'s' if count > 1 else ''}")
+            if count == 1:
+                partes.append(f"1 {obj_traduzido}")
+            else:
+                partes.append(f"{count} {obj_traduzido}s")
         
         if not partes:
             return "Não detectei pessoas ou objetos específicos."
         
-        return "Detectei " + ", ".join(partes) + "."
+        if len(partes) == 1:
+            return f"Detectei {partes[0]}."
+        elif len(partes) == 2:
+            return f"Detectei {partes[0]} e {partes[1]}."
+        else:
+            return "Detectei " + ", ".join(partes[:-1]) + " e " + partes[-1] + "."
 
     def _responder_pergunta_geral(self, pergunta):
         """Responde perguntas gerais usando OpenAI"""
@@ -422,7 +457,7 @@ class Interpreter:
         messages = [
             {
                 "role": "system",
-                "content": "Você é um assistente útil. Responda de forma clara em português."
+                "content": "Você é um assistente útil para pessoas com deficiência visual. Responda de forma clara e direta em português."
             },
             {
                 "role": "user", 
@@ -456,4 +491,4 @@ class Interpreter:
 
     def descrever_ambiente(self, objetos_detectados=None, faces_nomes=None):
         """Descrição do ambiente (método legado)"""
-        return self.responder_pergunta("Descreva o que você vê nesta imagem", objetos_detectados, faces_nomes)
+        return self.perguntar_sobre_imagem("Descreva o que você vê nesta imagem", objetos_detectados, faces_nomes)
