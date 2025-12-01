@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO FINAL ATUALIZADA com classificação de perguntas melhorada
+Interpreter - VERSÃO FINAL CORRIGIDA com respostas variadas e classificação perfeita
 """
 
 import logging
@@ -187,8 +187,8 @@ class Interpreter:
                 'dados_utilizados': "Pergunta geral (tempo/data)"
             }
         
-        # Classificar o tipo de pergunta - VERSÃO MELHORADA
-        tipo_pergunta = self._classificar_tipo_pergunta_melhorada(pergunta)
+        # Classificar o tipo de pergunta - USANDO MÉTODO CORRETO
+        tipo_pergunta = self._classificar_tipo_pergunta(pergunta)
         logger.info(f"🔍 Pergunta classificada como: {tipo_pergunta}")
         
         if tipo_pergunta == "sobre_imagem":
@@ -215,29 +215,28 @@ class Interpreter:
             'dados_utilizados': dados_utilizados
         }
 
-    # ========== CLASSIFICAÇÃO DE PERGUNTAS MELHORADA ==========
+    # ========== CLASSIFICAÇÃO DE PERGUNTAS CORRIGIDA ==========
 
-    def _classificar_tipo_pergunta_melhorada(self, pergunta):
-        """Classifica se a pergunta é sobre a imagem ou geral - VERSÃO MELHORADA"""
+    def _classificar_tipo_pergunta(self, pergunta):
+        """Classifica se a pergunta é sobre a imagem ou geral - VERSÃO SIMPLES E EFETIVA"""
         pergunta_lower = pergunta.lower().strip()
         
-        # Lista de perguntas claramente GERAIS que NÃO são sobre imagem
-        perguntas_gerais_absolutas = [
-            # Perguntas existenciais/conceituais
-            'o que é ', 'oque é ', 'qual é ', 'quem foi ', 'quem é ',
-            'história de ', 'significado de ', 'definição de ',
-            'explique ', 'explicar ', 'conceito de ',
+        # PERGUNTAS CLARAMENTE GERAIS (não sobre imagem)
+        gerais_absolutas = [
+            # Perguntas sobre conceitos/definições
+            'oque é', 'o que é', 'qual é ', 'quem foi ', 'quem é ',
+            'história de', 'significado de', 'definição de',
+            'explique ', 'explicar ', 'conceito de',
             
-            # Informações gerais
-            'capital de ', 'população de ', 'onde fica ',
-            'quantos habitantes ', 'qual a população ',
+            # Informações geográficas
+            'capital de', 'população de', 'onde fica ',
+            'quantos habitantes', 'qual a população',
             
             # Piadas e filosofia
             'conta uma piada', 'piada sobre', 'piada do',
             'qual o sentido da vida', 'filosofia',
             
             # Perguntas sobre o assistente
-            'como você está', 'tudo bem', 'como vai',
             'quem é você', 'qual seu nome', 'o que você faz',
             'qual sua função', 'você é ', 'é uma ia', 'é um robô',
             'como trabalha', 'como funciona',
@@ -249,7 +248,7 @@ class Interpreter:
             'oi', 'olá', 'bom dia', 'boa tarde', 'boa noite',
             'hello', 'hi', 'hey',
             
-            # Perguntas sobre condições físicas/meteorológicas
+            # Perguntas sobre condições físicas
             'qual a temperatura', 'temperatura atual', 'faz calor',
             'está frio', 'como está o tempo', 'previsão do tempo',
             'está chovendo', 'faz sol',
@@ -259,10 +258,10 @@ class Interpreter:
             'em que lugar', 'localização', 'em qual cidade',
             'em qual estado', 'em qual país',
             
-            # Ano/Data
+            # Ano/Data (já tratado separadamente)
             'que ano é', 'em que ano', 'qual o ano',
             
-            # Perguntas com definições claras
+            # Perguntas com definições
             'batata', 'abacaxi', 'computador', 'carro', 'casa',
             'animais', 'planetas', 'universo',
             
@@ -271,83 +270,81 @@ class Interpreter:
             
             # Perguntas sobre sentimentos/emoções
             'como está se sentindo', 'está feliz', 'está triste',
-            'como você se sente'
+            'como você se sente',
+            
+            # Perguntas sobre bem-estar do assistente
+            'como você está', 'tudo bem', 'como vai'
         ]
         
         # Verificar se é pergunta geral absoluta
-        for padrao in perguntas_gerais_absolutas:
+        for padrao in gerais_absolutas:
             if padrao in pergunta_lower:
                 return "geral"
         
-        # Lista de perguntas claramente sobre IMAGEM
-        perguntas_imagem_absolutas = [
-            # Pronomes demonstrativos + palavras imagem/foto
+        # PERGUNTAS CLARAMENTE SOBRE IMAGEM
+        imagem_absolutas = [
+            # Pronomes demonstrativos + imagem/foto
             'essa imagem', 'esta foto', 'na foto', 'na imagem',
             'nesta imagem', 'nesta foto', 'dessa imagem', 'dessa foto',
+            'essa foto', 'esta imagem',
             
             # Perguntas sobre visão/detecção
             'o que você vê', 'o que está vendo', 'o que consegue ver',
             'o que identifica', 'o que reconhece', 'o que detecta',
             'está vendo', 'consegue ver', 'pode ver',
             
-            # Perguntas com "tem" que claramente se referem à imagem
-            'tem na imagem', 'tem na foto', 'tem aí', 'tem ali',
-            'tem aqui', 'tem nessa', 'tem nessa imagem',
-            
-            # Perguntas específicas sobre conteúdo visual
-            'quem está na', 'onde está na', 'quantos tem na',
-            'quantas tem na', 'qual a cor do', 'qual a cor da',
-            
             # Descrever/analisar imagem
             'descreva a imagem', 'descreva a foto', 'analise a imagem',
             'analise a foto', 'descreva o que vê', 'descreva o ambiente',
             
-            # Perguntas sobre ambiente específico
+            # Perguntas específicas sobre conteúdo
+            'quem está na', 'onde está na', 
+            'qual a cor do', 'qual a cor da', 'qual cor tem',
+            
+            # Ambiente interno/externo
             'é interno ou externo', 'está dentro ou fora',
-            'parece ser interno', 'parece ser externo'
+            'parece ser interno', 'parece ser externo',
+            'interno ou externo'
         ]
         
         # Verificar se é pergunta sobre imagem absoluta
-        for padrao in perguntas_imagem_absolutas:
+        for padrao in imagem_absolutas:
             if padrao in pergunta_lower:
                 return "sobre_imagem"
         
-        # Palavras-chave para imagem (mas não absolutas)
-        palavras_imagem = [
-            'tem ', 'há ', 'vejo', 'vê',
+        # PERGUNTAS COM PALAVRAS-CHAVE DE IMAGEM
+        palavras_chave_imagem = [
+            # Palavras que indicam objetos visíveis
+            'tem ', 'há ', 'vejo', 'vê', 'visualizo',
             'pessoa', 'pessoas', 'gente', 'alguém',
             'objeto', 'objetos', 'coisa', 'coisas',
-            'ambiente', 'lugar', 'sala', 'quarto', 'cozinha',
+            
+            # Nomes de objetos específicos
             'cadeira', 'mesa', 'sofá', 'cama', 'computador',
             'tv', 'televisão', 'celular', 'planta', 'árvore',
-            'animal', 'cachorro', 'gato', 'carro', 'livro'
-        ]
-        
-        # Palavras-chave para perguntas gerais (mas não absolutas)
-        palavras_gerais = [
-            '?',  # Perguntas curtas sem contexto específico
-            'por que', 'como', 'quando', 'onde', 'quem',
-            'qual a', 'quais os', 'quais as'
-        ]
-        
-        # Se é uma pergunta muito curta (1-4 palavras) sem contexto de imagem, é geral
-        palavras = pergunta_lower.split()
-        if len(palavras) <= 4:
-            tem_palavra_imagem = any(palavra in pergunta_lower for palavra in palavras_imagem)
-            tem_palavra_geral = any(palavra in pergunta_lower for palavra in palavras_gerais)
+            'animal', 'cachorro', 'gato', 'carro', 'livro',
+            'garrafa', 'copo', 'prato', 'vaso', 'relógio',
+            'mochila', 'bolsa', 'quadro', 'bola', 'tenis',
+            'chapéu', 'guarda-chuva',
             
-            if not tem_palavra_imagem and tem_palavra_geral:
-                return "geral"
+            # Palavras sobre ambiente
+            'ambiente', 'lugar', 'sala', 'quarto', 'cozinha',
+            'banheiro', 'escritório', 'parque', 'rua', 'jardim'
+        ]
         
-        # Se tem palavras específicas de imagem e não é claramente geral
-        for palavra in palavras_imagem:
+        # Se tem palavras-chave de imagem, é sobre imagem
+        for palavra in palavras_chave_imagem:
             if palavra in pergunta_lower:
                 # Verificar se não é um falso positivo
                 if not self._e_falso_positivo_imagem(pergunta_lower, palavra):
                     return "sobre_imagem"
         
-        # Se chegou aqui, é difícil determinar - padrão: perguntas com ? são sobre imagem
+        # Se chegou aqui e tem interrogação, assume que é sobre imagem
         if '?' in pergunta:
+            # Mas se for muito curta (1-3 palavras), pode ser geral
+            palavras = pergunta_lower.split()
+            if len(palavras) <= 3:
+                return "geral"
             return "sobre_imagem"
         
         # Default para geral
@@ -355,14 +352,14 @@ class Interpreter:
     
     def _e_falso_positivo_imagem(self, pergunta_lower, palavra_imagem):
         """Verifica se uma palavra de imagem é um falso positivo"""
-        # Palavras que podem aparecer em perguntas gerais
         falsos_positivos = {
-            'tem': ['tem perigo', 'tem problema', 'tem alguma dica', 'tem como'],
-            'pessoa': ['pessoa famosa', 'pessoa importante'],
-            'objeto': ['objeto de estudo', 'objeto histórico'],
-            'ambiente': ['ambiente de trabalho', 'ambiente escolar'],
-            'lugar': ['lugar turístico', 'lugar histórico'],
-            'animal': ['animal em extinção', 'animal selvagem']
+            'tem': ['tem perigo', 'tem problema', 'tem alguma dica', 'tem como', 'tem certeza'],
+            'pessoa': ['pessoa famosa', 'pessoa importante', 'pessoa histórica'],
+            'objeto': ['objeto de estudo', 'objeto histórico', 'objeto filosófico'],
+            'ambiente': ['ambiente de trabalho', 'ambiente escolar', 'ambiente familiar'],
+            'lugar': ['lugar turístico', 'lugar histórico', 'lugar famoso'],
+            'animal': ['animal em extinção', 'animal selvagem', 'animal doméstico'],
+            'planta': ['planta medicinal', 'planta ornamental', 'planta comestível']
         }
         
         if palavra_imagem in falsos_positivos:
@@ -461,7 +458,7 @@ class Interpreter:
     # ========== MÉTODO CORRIGIDO PARA RESPONDER SOBRE IMAGEM ==========
 
     def _responder_sobre_imagem_corrigida(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Responde de forma CORRIGIDA, com artigos certos e análises apropriadas"""
+        """Responde de forma CORRIGIDA, com respostas variadas e precisas"""
         # Preparar dados REAIS
         objetos_filtrados = []
         if objetos_detectados:
@@ -475,64 +472,53 @@ class Interpreter:
         total_pessoas = len(faces_nomes or [])
         faces_conhecidas = [nome for nome in (faces_nomes or []) if nome != 'Desconhecido']
         
-        # DEBUG: Mostrar o que foi realmente detectado
-        logger.info(f"📊 Dados reais detectados: {dict(contador_objetos)}, Pessoas: {total_pessoas}, Faces conhecidas: {faces_conhecidas}")
+        logger.info(f"📊 Dados reais: {dict(contador_objetos)}, Pessoas: {total_pessoas}")
         
-        # Se temos OpenAI, usar para resposta corrigida
+        # Se temos OpenAI, usar para resposta
         if self.client:
-            return self._responder_com_ia_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_com_ia_melhorada(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
         else:
-            return self._responder_base_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_base_melhorada(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
 
-    def _responder_com_ia_corrigida(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
-        """Resposta corrigida usando IA - com artigos corretos e análises"""
+    def _responder_com_ia_melhorada(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
+        """Resposta usando IA - com respostas muito mais variadas"""
         try:
-            # Construir lista PRECISA do que foi detectado
-            dados_reais = self._construir_dados_reais_precisos(contador_objetos, total_pessoas, faces_conhecidas)
+            # Construir dados reais
+            dados_reais = self._construir_dados_reais_detalhados(contador_objetos, total_pessoas, faces_conhecidas)
             
-            # Analisar o tipo de ambiente baseado nos objetos
-            analise_ambiente = self._analisar_tipo_ambiente(contador_objetos)
-            
-            # Preparar contexto sobre artigos para ajudar a IA
-            artigos_contexto = self._preparar_contexto_artigos(contador_objetos)
-            
-            # Adicionar instruções específicas para diferentes tipos de perguntas
-            instrucoes_especificas = self._obter_instrucoes_para_pergunta(pergunta)
+            # Analisar contexto
+            analise_contexto = self._analisar_contexto_detalhado(contador_objetos, total_pessoas)
             
             messages = [
                 {
                     "role": "system",
                     "content": f"""Você é a Specula, uma assistente que responde perguntas sobre imagens.
 
-                    DADOS REAIS DETECTADOS:
+                    DADOS REAIS DETECTADOS NA IMAGEM:
                     {dados_reais}
                     
-                    ANÁLISE DO AMBIENTE (use para perguntas sobre interno/externo):
-                    {analise_ambiente}
-                    
-                    INFORMAÇÕES SOBRE ARTIGOS (USE CORRETAMENTE):
-                    {artigos_contexto}
-                    
-                    INSTRUÇÕES ESPECÍFICAS PARA ESTA PERGUNTA:
-                    {instrucoes_especificas}
+                    ANÁLISE DE CONTEXTO:
+                    {analise_contexto}
 
                     REGRAS IMPORTANTES:
-                    1. Use artigos corretos: "uma bola", "um sofá", "uma pessoa"
-                    2. Para "bola" → SEMPRE "uma bola" (feminino)
-                    3. Para "pessoas" → "algumas pessoas" ou "duas pessoas"
-                    4. Seja natural e preciso
-                    5. Para perguntas sobre ambiente, use a análise fornecida
-                    6. Não invente objetos que não foram detectados
+                    1. Baseie sua resposta APENAS nos dados acima
+                    2. Seja natural e variada nas respostas
+                    3. Use artigos corretos: "uma bola", "um sofá", "uma pessoa"
+                    4. Não invente objetos que não foram detectados
+                    5. Seja útil e acolhedora
 
-                    COMO RESPONDER DIFERENTES PERGUNTAS:
+                    INSTRUÇÕES ESPECÍFICAS:
+                    - Para "O que tem nessa imagem?": Descreva TUDO que foi detectado
+                    - Para "Quantas pessoas você vê?": Diga APENAS o número de pessoas
+                    - Para "Descreva o ambiente": Descreva o ambiente de forma completa
+                    - Para "Quais objetos estão visíveis?": Liste apenas os objetos
+                    - Para "É interno ou externo?": Use a análise de contexto
+                    - Para perguntas do tipo "Tem [objeto]?": Responda especificamente sobre aquele objeto
                     
-                    "O que tem?" ou "Descreva" → Descreva TUDO que foi detectado
-                    "Quantas pessoas?" → Diga o número exato de pessoas
-                    "É interno ou externo?" → Use a análise do ambiente
-                    "Tem [objeto]?" → Verifique nos dados e responda com artigo correto
-                    "Quais objetos?" → Liste os objetos detectados
-                    
-                    Lembre-se dos artigos: bola = feminino, sofá = masculino"""
+                    VARIEDADE NAS RESPOSTAS:
+                    - Use diferentes formas de começar: "Na imagem...", "Vejo que...", "Analisando..."
+                    - Para a mesma pergunta, dê respostas com estruturas diferentes
+                    - Seja natural como uma conversa real"""
                 },
                 {
                     "role": "user", 
@@ -544,133 +530,22 @@ class Interpreter:
                 model=self.model_name,
                 messages=messages,
                 max_tokens=200,
-                temperature=0.3,  # Baixo para ser preciso
+                temperature=0.7,  # Mais alto para variedade
             )
             
             resposta = response.choices[0].message.content.strip()
             
-            # Corrigir artigos se necessário
-            resposta = self._corrigir_artigos_na_resposta(resposta)
+            # Corrigir artigos básicos
+            resposta = self._corrigir_artigos_basicos(resposta)
             
             return resposta
             
         except Exception as e:
             logger.error(f"❌ Erro ao responder com IA: {e}")
-            return self._responder_base_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
-    
-    def _obter_instrucoes_para_pergunta(self, pergunta):
-        """Retorna instruções específicas baseadas no tipo de pergunta"""
-        pergunta_lower = pergunta.lower()
-        
-        if 'quantas pessoas' in pergunta_lower:
-            return "RESPONDA APENAS COM O NÚMERO DE PESSOAS. Exemplo: 'Tem 2 pessoas.' ou 'Não tem pessoas.'"
-        
-        elif 'descreva' in pergunta_lower or 'o que tem' in pergunta_lower:
-            return "DESCREVA TUDO o que foi detectado na lista acima. Liste todos os objetos e pessoas."
-        
-        elif 'interno' in pergunta_lower or 'externo' in pergunta_lower:
-            return "USE A ANÁLISE DO AMBIENTE fornecida acima para responder se é interno ou externo."
-        
-        elif 'tem ' in pergunta_lower and ('?' in pergunta or pergunta_lower.endswith('?')):
-            # Extrair objeto da pergunta
-            objeto_pergunta = self._extrair_objeto_da_pergunta(pergunta_lower)
-            if objeto_pergunta:
-                return f"VERIFIQUE SE '{objeto_pergunta}' ESTÁ NA LISTA DE OBJETOS DETECTADOS. Se sim, diga 'Sim, tem...'. Se não, diga 'Não, não tem...'."
-        
-        return "Responda baseado apenas nos dados detectados acima."
+            return self._responder_base_melhorada(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
 
-    def _preparar_contexto_artigos(self, contador_objetos):
-        """Prepara contexto sobre artigos para ajudar a IA"""
-        artigos = []
-        
-        for obj_ingles, quantidade in contador_objetos.items():
-            if obj_ingles == 'person':
-                continue  # Pessoas tratadas separadamente
-                
-            obj_pt = self._traduzir_objeto(obj_ingles)
-            
-            # Determinar artigo
-            if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta', 'flor', 'xicara', 
-                         'maleta', 'garrafa', 'televisão', 'pessoa', 'árvore', 'grama']:
-                artigo = "uma"
-            else:
-                artigo = "um"
-            
-            if quantidade == 1:
-                artigos.append(f"{obj_pt} → {artigo} {obj_pt}")
-            elif quantidade == 2:
-                artigos.append(f"{obj_pt} → duas {obj_pt}s")
-            else:
-                artigos.append(f"{obj_pt} → {quantidade} {obj_pt}s")
-        
-        if artigos:
-            return "Artigos: " + " | ".join(artigos)
-        else:
-            return "Nenhum objeto detectado para artigos"
-
-    def _corrigir_artigos_na_resposta(self, resposta):
-        """Corrige artigos incorretos na resposta"""
-        # Correções comuns
-        correcoes = {
-            "um bola": "uma bola",
-            "um pessoas": "algumas pessoas",
-            "um cadeira": "uma cadeira",
-            "um mesa": "uma mesa",
-            "um cama": "uma cama",
-            "um planta": "uma planta",
-            "um flor": "uma flor",
-            "um televisão": "uma televisão",
-            "um pessoa": "uma pessoa",
-            "um árvore": "uma árvore",
-            "um grama": "uma grama",
-            "umas pessoa": "algumas pessoas",
-            "ums pessoas": "algumas pessoas"
-        }
-        
-        resposta_corrigida = resposta
-        for errado, correto in correcoes.items():
-            if errado in resposta_corrigida.lower():
-                # Substituir mantendo maiúsculas/minúsculas
-                resposta_corrigida = re.sub(
-                    re.escape(errado), 
-                    correto, 
-                    resposta_corrigida, 
-                    flags=re.IGNORECASE
-                )
-        
-        return resposta_corrigida
-
-    def _analisar_tipo_ambiente(self, contador_objetos):
-        """Analisa o tipo de ambiente baseado nos objetos detectados"""
-        objetos_detectados = list(contador_objetos.keys())
-        
-        # Objetos típicos de ambientes internos
-        objetos_internos = ['chair', 'couch', 'sofa', 'bed', 'table', 'desk', 'tv', 'television', 
-                           'computer', 'laptop', 'monitor', 'book', 'lamp', 'picture', 'painting',
-                           'clock', 'vase', 'plate', 'cup', 'bottle', 'cell phone']
-        
-        # Objetos típicos de ambientes externos
-        objetos_externos = ['car', 'bicycle', 'tree', 'grass', 'sports ball', 'ball', 'frisbee', 
-                           'snowboard', 'umbrella', 'dog', 'cat', 'person']  # person pode ser ambos
-        
-        # Contar quantos objetos de cada tipo
-        count_interno = sum(1 for obj in objetos_detectados if obj in objetos_internos)
-        count_externo = sum(1 for obj in objetos_detectados if obj in objetos_externos)
-        
-        # Se tem bola e pessoas, provavelmente é externo (esportes)
-        if 'sports ball' in objetos_detectados or 'ball' in objetos_detectados:
-            if 'person' in objetos_detectados:
-                return "ANÁLISE: Tem pessoas com uma bola, então provavelmente é um AMBIENTE EXTERNO para esportes."
-        
-        if count_interno > count_externo:
-            return "ANÁLISE: Pela presença de objetos como móveis ou eletrônicos, parece ser um AMBIENTE INTERNO (como casa, escritório, sala)."
-        elif count_externo > count_interno:
-            return "ANÁLISE: Pela presença de objetos como árvores, grama ou veículos, parece ser um AMBIENTE EXTERNO (como rua, parque, área aberta)."
-        else:
-            return "ANÁLISE: Difícil determinar se é interno ou externo apenas pelos objetos detectados."
-
-    def _construir_dados_reais_precisos(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Constrói lista precisa do que foi realmente detectado"""
+    def _construir_dados_reais_detalhados(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Constrói dados detalhados para a IA"""
         partes = []
         
         # Pessoas
@@ -679,33 +554,93 @@ class Interpreter:
         
         if total_detectado > 0:
             if faces_conhecidas:
-                partes.append(f"Pessoas identificadas: {', '.join(faces_conhecidas)}")
+                if len(faces_conhecidas) == 1:
+                    partes.append(f"1 pessoa identificada: {faces_conhecidas[0]}")
+                else:
+                    partes.append(f"{total_detectado} pessoas identificadas: {', '.join(faces_conhecidas)}")
             else:
                 if total_detectado == 1:
-                    partes.append(f"Pessoas: 1 pessoa")
+                    partes.append("1 pessoa não identificada")
                 else:
-                    partes.append(f"Pessoas: {total_detectado} pessoas")
+                    partes.append(f"{total_detectado} pessoas não identificadas")
+        else:
+            partes.append("0 pessoas")
         
-        # Objetos detectados (traduzidos)
+        # Objetos detectados
         outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
         if outros_objetos:
-            objetos_traduzidos = []
+            objetos_lista = []
             for obj_ingles, quantidade in outros_objetos.items():
                 obj_pt = self._traduzir_objeto(obj_ingles)
-                if quantidade == 1:
-                    objetos_traduzidos.append(f"1 {obj_pt}")
-                else:
-                    objetos_traduzidos.append(f"{quantidade} {obj_pt}s")
+                objetos_lista.append(f"{quantidade} {obj_pt}{'s' if quantidade > 1 else ''}")
             
-            partes.append(f"Objetos detectados: {', '.join(objetos_traduzidos)}")
-        
-        if not partes:
-            return "Nenhum objeto ou pessoa detectado."
+            partes.append(f"Objetos: {', '.join(objetos_lista)}")
+        else:
+            partes.append("0 objetos específicos")
         
         return " | ".join(partes)
 
-    def _responder_base_corrigida(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
-        """Resposta base corrigida - com artigos corretos e análises apropriadas"""
+    def _analisar_contexto_detalhado(self, contador_objetos, total_pessoas):
+        """Analisa contexto detalhado"""
+        objetos_detectados = list(contador_objetos.keys())
+        
+        analises = []
+        
+        # Análise de pessoas
+        pessoas_yolo = contador_objetos.get('person', 0)
+        total_detectado = max(total_pessoas, pessoas_yolo)
+        
+        if total_detectado > 0:
+            if total_detectado == 1:
+                analises.append("Há uma pessoa na imagem")
+            elif total_detectado == 2:
+                analises.append("Há duas pessoas na imagem, pode ser um encontro ou conversa")
+            elif total_detectado > 2:
+                analises.append(f"Há {total_detectado} pessoas, pode ser um grupo ou reunião")
+        
+        # Análise de ambiente
+        objetos_internos = ['chair', 'couch', 'sofa', 'bed', 'table', 'desk', 'tv', 'television', 
+                           'computer', 'laptop', 'monitor', 'book', 'lamp']
+        objetos_externos = ['car', 'bicycle', 'tree', 'grass', 'sports ball', 'ball']
+        
+        count_interno = sum(1 for obj in objetos_detectados if obj in objetos_internos)
+        count_externo = sum(1 for obj in objetos_detectados if obj in objetos_externos)
+        
+        if count_interno > count_externo:
+            analises.append("O ambiente parece ser interno (casa, escritório, sala)")
+        elif count_externo > count_interno:
+            analises.append("O ambiente parece ser externo (rua, parque, área aberta)")
+        
+        # Análise de objetos específicos
+        if 'chair' in objetos_detectados:
+            analises.append("Tem cadeiras, pode ser um ambiente de descanso ou trabalho")
+        if 'table' in objetos_detectados:
+            analises.append("Tem mesas, pode ser para refeições ou trabalho")
+        if 'laptop' in objetos_detectados or 'computer' in objetos_detectados:
+            analises.append("Tem computadores, ambiente de trabalho ou estudo")
+        
+        return ". ".join(analises)
+
+    def _corrigir_artigos_basicos(self, resposta):
+        """Corrige apenas os artigos mais básicos"""
+        correcoes = {
+            "um bola": "uma bola",
+            "um cadeira": "uma cadeira",
+            "um mesa": "uma mesa",
+            "um cama": "uma cama",
+            "um planta": "uma planta",
+            "um pessoa": "uma pessoa"
+        }
+        
+        resposta_corrigida = resposta
+        for errado, correto in correcoes.items():
+            if errado in resposta_corrigida.lower():
+                resposta_corrigida = re.sub(re.escape(errado), correto, resposta_corrigida, flags=re.IGNORECASE)
+        
+        return resposta_corrigida
+
+    def _responder_base_melhorada(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
+        """Resposta base muito melhorada - com respostas variadas"""
         pergunta_lower = pergunta.lower()
         
         # Dados reais
@@ -716,315 +651,328 @@ class Interpreter:
         # Lista de objetos detectados (em português)
         objetos_pt = {self._traduzir_objeto(obj): qtd for obj, qtd in objetos_reais.items()}
         
-        # PERGUNTA: "O que tem nessa imagem?" ou "Descreva o ambiente"
-        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'o que você vê', 'descreva o ambiente', 'o que tem na imagem']):
+        # GERAR RESPOSTAS VARIADAS
+        respostas_variadas = {
+            'descrever': [
+                "Na imagem, ",
+                "Analisando a foto, ",
+                "Vejo que ",
+                "Observando a imagem, ",
+                "Na foto, "
+            ],
+            'pessoas': [
+                f"tem {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}",
+                f"identifico {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}",
+                f"consigo ver {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}",
+                f"percebo {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}",
+                f"{total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''} visível{'is' if total_pessoas_reais > 1 else ''}"
+            ]
+        }
+        
+        import random
+        
+        # PERGUNTA: "O que tem nessa imagem?" ou similar
+        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'o que você vê']):
             if total_pessoas_reais > 0 or objetos_pt:
-                return self._descrever_ambiente_com_artigos_corretos(total_pessoas_reais, faces_conhecidas, objetos_pt)
+                inicio = random.choice(respostas_variadas['descrever'])
+                
+                if total_pessoas_reais > 0:
+                    pessoas_texto = random.choice(respostas_variadas['pessoas'])
+                    
+                    if objetos_pt:
+                        # Tem pessoas e objetos
+                        objetos_lista = []
+                        for obj_pt, qtd in objetos_pt.items():
+                            if qtd == 1:
+                                artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta'] else "um"
+                                objetos_lista.append(f"{artigo} {obj_pt}")
+                            else:
+                                objetos_lista.append(f"{qtd} {obj_pt}s")
+                        
+                        if len(objetos_lista) > 1:
+                            objetos_texto = f"{', '.join(objetos_lista[:-1])} e {objetos_lista[-1]}"
+                        else:
+                            objetos_texto = objetos_lista[0]
+                        
+                        return f"{inicio}{pessoas_texto} e também {objetos_texto}."
+                    else:
+                        # Só tem pessoas
+                        return f"{inicio}{pessoas_texto}."
+                else:
+                    # Só tem objetos
+                    objetos_lista = []
+                    for obj_pt, qtd in objetos_pt.items():
+                        if qtd == 1:
+                            artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta'] else "um"
+                            objetos_lista.append(f"{artigo} {obj_pt}")
+                        else:
+                            objetos_lista.append(f"{qtd} {obj_pt}s")
+                    
+                    if len(objetos_lista) > 1:
+                        objetos_texto = f"{', '.join(objetos_lista[:-1])} e {objetos_lista[-1]}"
+                    else:
+                        objetos_texto = objetos_lista[0]
+                    
+                    return f"{inicio}{objetos_texto}."
             else:
-                return "Não estou identificando elementos específicos nesta imagem. Sou a Specula, sua assistente visual!"
+                return "Não estou identificando elementos específicos nesta imagem."
         
         # PERGUNTA: "Quantas pessoas você vê?"
         elif 'quantas pessoas' in pergunta_lower:
-            return self._responder_quantas_pessoas(total_pessoas_reais, faces_conhecidas)
+            if total_pessoas_reais > 0:
+                respostas = [
+                    f"Tem {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}.",
+                    f"Vejo {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}.",
+                    f"Identifico {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}.",
+                    f"Na imagem, há {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}."
+                ]
+                return random.choice(respostas)
+            else:
+                return "Não tem pessoas visíveis na imagem."
+        
+        # PERGUNTA: "Descreva o ambiente"
+        elif 'descreva o ambiente' in pergunta_lower:
+            if total_pessoas_reais > 0:
+                respostas = [
+                    f"O ambiente tem {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}. É difícil determinar mais detalhes sem objetos específicos visíveis.",
+                    f"Vejo {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''} no ambiente. Parece um espaço simples.",
+                    f"O ambiente contém {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}. Não identifico muitos elementos adicionais."
+                ]
+                return random.choice(respostas)
+            else:
+                return "O ambiente parece simples, sem muitos elementos visíveis."
         
         # PERGUNTA: "Quais objetos estão visíveis?"
-        elif 'quais objetos' in pergunta_lower or 'identifica' in pergunta_lower:
-            return self._listar_objetos_com_artigos(objetos_pt)
+        elif 'quais objetos' in pergunta_lower:
+            if objetos_pt:
+                lista_objetos = []
+                for obj_pt, qtd in objetos_pt.items():
+                    if qtd == 1:
+                        artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta'] else "um"
+                        lista_objetos.append(f"{artigo} {obj_pt}")
+                    else:
+                        lista_objetos.append(f"{qtd} {obj_pt}s")
+                
+                if len(lista_objetos) > 1:
+                    objetos_texto = f"{', '.join(lista_objetos[:-1])} e {lista_objetos[-1]}"
+                else:
+                    objetos_texto = lista_objetos[0]
+                
+                return f"Os objetos visíveis são: {objetos_texto}."
+            else:
+                return "Não estou identificando objetos específicos na imagem."
         
         # PERGUNTA: "Esta foto parece ser interna ou externa?"
-        elif any(palavra in pergunta_lower for palavra in ['interno', 'externo', 'dentro', 'fora', 'é interno']):
-            return self._analisar_interno_externo_inteligente(contador_objetos)
+        elif any(palavra in pergunta_lower for palavra in ['interno', 'externo', 'dentro', 'fora']):
+            analise = self._analisar_interno_externo_simples(contador_objetos)
+            respostas = [
+                f"{analise}",
+                f"Pela análise, {analise.lower()}",
+                f"Baseado no que vejo, {analise.lower()}"
+            ]
+            return random.choice(respostas)
         
         # PERGUNTA sobre objetos específicos
         for objeto_pergunta in ['cadeira', 'sofá', 'mesa', 'cama', 'computador', 'tv', 'televisão', 
                                'celular', 'livro', 'garrafa', 'copo', 'prato', 'vaso', 'relógio',
-                               'cachorro', 'gato', 'carro', 'bicicleta', 'mochila', 'bolsa',
-                               'planta', 'flor', 'refrigerante', 'xicara', 'mouse', 'teclado',
-                               'abajur', 'quadro', 'bola', 'tenis', 'chapéu', 'guarda-chuva',
-                               'maleta', 'frisbee', 'neve', 'garrafa esportiva', 'árvore', 'grama']:
+                               'cachorro', 'gato', 'carro', 'bicicleta', 'planta', 'flor', 'árvore']:
             
             if objeto_pergunta in pergunta_lower:
-                return self._verificar_objeto_com_artigo(objeto_pergunta, objetos_pt)
+                objeto_detectado = False
+                quantidade = 0
+                
+                for obj_pt, qtd in objetos_pt.items():
+                    if objeto_pergunta in obj_pt.lower() or obj_pt.lower() in objeto_pergunta:
+                        objeto_detectado = True
+                        quantidade = qtd
+                        break
+                
+                if objeto_detectado:
+                    if quantidade == 1:
+                        artigo = "uma" if objeto_pergunta in ['cadeira', 'mesa', 'cama', 'planta', 'flor'] else "um"
+                        respostas_sim = [
+                            f"Sim, tem {artigo} {objeto_pergunta}.",
+                            f"Sim, identifico {artigo} {objeto_pergunta}.",
+                            f"Sim, vejo {artigo} {objeto_pergunta} na imagem."
+                        ]
+                        return random.choice(respostas_sim)
+                    else:
+                        return f"Sim, tem {quantidade} {objeto_pergunta}s."
+                else:
+                    respostas_nao = [
+                        f"Não, não tem {objeto_pergunta}.",
+                        f"Não estou vendo {objeto_pergunta}.",
+                        f"Não identifico {objeto_pergunta} na imagem."
+                    ]
+                    return random.choice(respostas_nao)
         
         # PERGUNTA sobre categorias
         if 'eletrônic' in pergunta_lower:
-            return self._verificar_categoria_com_artigo(['computador', 'tv', 'televisão', 'celular', 'monitor', 'mouse', 'teclado'], 
-                                                       objetos_pt, 'eletrônicos')
+            return self._verificar_categoria(['computador', 'tv', 'televisão', 'celular', 'monitor'], 
+                                           objetos_pt, 'eletrônicos')
         
         if 'plant' in pergunta_lower or 'natureza' in pergunta_lower:
-            return self._verificar_categoria_com_artigo(['planta', 'flor', 'árvore', 'grama'], objetos_pt, 'plantas ou natureza')
+            return self._verificar_categoria(['planta', 'flor', 'árvore', 'grama'], objetos_pt, 'plantas ou natureza')
         
         if 'móve' in pergunta_lower:
-            return self._verificar_categoria_com_artigo(['cadeira', 'sofá', 'mesa', 'cama'], objetos_pt, 'móveis')
+            return self._verificar_categoria(['cadeira', 'sofá', 'mesa', 'cama'], objetos_pt, 'móveis')
         
-        if 'animal' in pergunta_lower:
-            return self._verificar_categoria_com_artigo(['cachorro', 'gato'], objetos_pt, 'animais')
-        
-        if 'esport' in pergunta_lower:
-            return self._verificar_categoria_com_artigo(['bola', 'tenis', 'frisbee', 'neve'], objetos_pt, 'itens esportivos')
-        
-        # Resposta genérica para perguntas sobre imagem não específicas
+        # Resposta genérica para perguntas sobre imagem não cobertas
         if total_pessoas_reais > 0:
-            return f"Vejo {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}."
+            respostas = [
+                f"Vejo {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''} na imagem.",
+                f"Na foto, há {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}.",
+                f"Identifico {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''} visível{'is' if total_pessoas_reais > 1 else ''}."
+            ]
+            return random.choice(respostas)
         elif objetos_pt:
             primeiro_obj = list(objetos_pt.items())[0]
             obj_nome = primeiro_obj[0]
             qtd = primeiro_obj[1]
             
             if qtd == 1:
-                artigo = "uma" if obj_nome in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta', 'flor', 'xicara', 'maleta', 'garrafa', 'árvore', 'grama'] else "um"
+                artigo = "uma" if obj_nome in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta'] else "um"
                 return f"Vejo {artigo} {obj_nome}."
             else:
                 return f"Vejo {qtd} {obj_nome}s."
         else:
-            return "Não estou identificando muitos detalhes no ambiente. Sou a Specula, sua assistente visual!"
+            return "Não estou identificando muitos detalhes específicos no ambiente."
 
-    def _extrair_objeto_da_pergunta(self, pergunta_lower):
-        """Extrai objeto mencionado na pergunta"""
-        # Padrões comuns
-        padroes = [
-            r'tem\s+(\w+)',
-            r'ha\s+(\w+)',
-            r'v[êe]\s+(\w+)',
-            r'identifica\s+(\w+)',
-            r'reconhece\s+(\w+)'
-        ]
-        
-        for padrao in padroes:
-            match = re.search(padrao, pergunta_lower)
-            if match:
-                return match.group(1)
-        
-        return None
-
-    def _descrever_ambiente_com_artigos_corretos(self, total_pessoas, faces_conhecidas, objetos_pt):
-        """Descreve o ambiente com artigos gramaticais corretos"""
-        partes = []
-        
-        if total_pessoas > 0:
-            if faces_conhecidas:
-                if len(faces_conhecidas) == 1:
-                    partes.append(f"o {faces_conhecidas[0]}")
-                else:
-                    partes.append(f"o {', '.join(faces_conhecidas[:-1])} e o {faces_conhecidas[-1]}")
-            else:
-                if total_pessoas == 1:
-                    partes.append("uma pessoa")
-                elif total_pessoas == 2:
-                    partes.append("duas pessoas")
-                else:
-                    partes.append(f"{total_pessoas} pessoas")
-        
-        if objetos_pt:
-            for obj_pt, qtd in objetos_pt.items():
-                if qtd == 1:
-                    # Determinar artigo correto
-                    if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta', 'flor', 
-                                 'xicara', 'maleta', 'garrafa', 'televisão', 'pessoa', 'árvore', 'grama']:
-                        artigo = "uma"
-                    else:
-                        artigo = "um"
-                    partes.append(f"{artigo} {obj_pt}")
-                else:
-                    partes.append(f"{qtd} {obj_pt}s")
-        
-        if partes:
-            if len(partes) == 1:
-                return f"Tem {partes[0]}."
-            else:
-                return f"Tem {', '.join(partes[:-1])} e {partes[-1]}."
-        else:
-            return "Não tem muita coisa visível."
-
-    def _responder_quantas_pessoas(self, total_pessoas, faces_conhecidas):
-        """Responde sobre quantas pessoas"""
-        if total_pessoas > 0:
-            if faces_conhecidas:
-                if len(faces_conhecidas) == 1:
-                    return f"Tem uma pessoa: o {faces_conhecidas[0]}."
-                else:
-                    return f"Tem {total_pessoas} pessoas: {', '.join(faces_conhecidas)}."
-            else:
-                if total_pessoas == 1:
-                    return "Tem uma pessoa."
-                elif total_pessoas == 2:
-                    return "Tem duas pessoas."
-                else:
-                    return f"Tem {total_pessoas} pessoas."
-        else:
-            return "Não tem ninguém."
-
-    def _listar_objetos_com_artigos(self, objetos_pt):
-        """Lista objetos com artigos corretos"""
-        if objetos_pt:
-            lista = []
-            for obj_pt, qtd in objetos_pt.items():
-                if qtd == 1:
-                    if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 'planta', 'flor', 
-                                 'xicara', 'maleta', 'garrafa', 'televisão', 'árvore', 'grama']:
-                        artigo = "uma"
-                    else:
-                        artigo = "um"
-                    lista.append(f"{artigo} {obj_pt}")
-                else:
-                    lista.append(f"{qtd} {obj_pt}s")
-            
-            return f"Tem {', '.join(lista)}."
-        else:
-            return "Não estou vendo objetos específicos."
-
-    def _analisar_interno_externo_inteligente(self, contador_objetos):
-        """Analisa se é interno ou externo de forma mais inteligente"""
+    def _analisar_interno_externo_simples(self, contador_objetos):
+        """Análise simples de interno/externo"""
         objetos_detectados = list(contador_objetos.keys())
         
-        # Se tem bola e pessoas, provavelmente é externo (esportes)
-        if ('sports ball' in objetos_detectados or 'ball' in objetos_detectados) and 'person' in objetos_detectados:
-            return "Pela presença de pessoas com uma bola, parece ser um ambiente externo para esportes."
+        objetos_internos = ['chair', 'couch', 'sofa', 'bed', 'table', 'desk', 'tv', 'television', 'laptop', 'computer']
+        objetos_externos = ['car', 'bicycle', 'tree', 'grass', 'sports ball', 'ball']
         
-        # Verificar por objetos externos fortes
-        if any(obj in objetos_detectados for obj in ['tree', 'grass', 'sports ball', 'frisbee', 'snowboard']):
-            return "Pela presença de objetos como bola ou elementos naturais, parece ser um ambiente externo."
+        count_interno = sum(1 for obj in objetos_detectados if obj in objetos_internos)
+        count_externo = sum(1 for obj in objetos_detectados if obj in objetos_externos)
         
-        # Verificar por objetos internos fortes
-        elif any(obj in objetos_detectados for obj in ['chair', 'couch', 'bed', 'table', 'desk', 'tv', 'computer']):
-            return "Pela presença de móveis ou eletrônicos, parece ser um ambiente interno."
-        
+        if count_interno > count_externo:
+            return "Parece ser um ambiente interno."
+        elif count_externo > count_interno:
+            return "Parece ser um ambiente externo."
         else:
-            return "É difícil determinar só pelos objetos detectados."
+            return "É difícil determinar se é interno ou externo."
 
-    def _verificar_objeto_com_artigo(self, objeto_pergunta, objetos_pt):
-        """Verifica objeto com artigo correto"""
-        objeto_detectado = False
-        quantidade = 0
+    def _verificar_categoria(self, objetos_categoria, objetos_pt, nome_categoria):
+        """Verifica categoria"""
+        import random
         
-        for obj_pt, qtd in objetos_pt.items():
-            if objeto_pergunta in obj_pt.lower() or obj_pt.lower() in objeto_pergunta:
-                objeto_detectado = True
-                quantidade = qtd
-                break
-        
-        if objeto_detectado:
-            if quantidade == 1:
-                artigo = "uma" if objeto_pergunta in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 
-                                                     'planta', 'flor', 'xicara', 'maleta', 'árvore', 'grama'] else "um"
-                return f"Sim, tem {artigo} {objeto_pergunta}."
-            else:
-                return f"Sim, tem {quantidade} {objeto_pergunta}s."
-        else:
-            return f"Não, não tem {objeto_pergunta}."
-
-    def _verificar_categoria_com_artigo(self, objetos_categoria, objetos_pt, nome_categoria):
-        """Verifica categoria com artigos corretos"""
         encontrados = []
         for obj_pt, qtd in objetos_pt.items():
             if obj_pt in objetos_categoria:
                 if qtd == 1:
-                    artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'cama', 'sofá', 
-                                               'planta', 'flor', 'xicara', 'maleta', 'árvore', 'grama'] else "um"
+                    artigo = "uma" if obj_pt in ['planta', 'flor', 'árvore'] else "um"
                     encontrados.append(f"{artigo} {obj_pt}")
                 else:
                     encontrados.append(f"{qtd} {obj_pt}s")
         
         if encontrados:
-            return f"Sim, tem {', '.join(encontrados)}."
+            if len(encontrados) > 1:
+                objetos_texto = f"{', '.join(encontrados[:-1])} e {encontrados[-1]}"
+            else:
+                objetos_texto = encontrados[0]
+            
+            respostas = [
+                f"Sim, tem {objetos_texto}.",
+                f"Sim, identifico {objetos_texto}.",
+                f"Sim, vejo {objetos_texto} na imagem."
+            ]
+            return random.choice(respostas)
         else:
-            return f"Não, não tem {nome_categoria}."
+            respostas = [
+                f"Não, não tem {nome_categoria}.",
+                f"Não estou vendo {nome_categoria}.",
+                f"Não identifico {nome_categoria} na imagem."
+            ]
+            return random.choice(respostas)
 
     # ========== MÉTODO PARA PERGUNTAS GERAIS CORRIGIDO ==========
 
     def _responder_pergunta_geral_corrigida(self, pergunta):
-        """Responde perguntas gerais de forma mais útil e natural"""
+        """Responde perguntas gerais de forma muito melhor"""
         if not self.client:
-            return "Olá! Sou a Specula, sua assistente visual. Como posso te ajudar?"
+            return self._responder_pergunta_geral_local(pergunta)
         
         pergunta_lower = pergunta.lower()
         
-        # Perguntas sobre especificações técnicas
-        if any(palavra in pergunta_lower for palavra in ['qual a temperatura', 'temperatura atual', 'como está o tempo', 'faz calor', 'está frio']):
-            return "No momento não tenho acesso a informações meteorológicas em tempo real. Mas posso te ajudar analisando imagens do ambiente ao seu redor! Tem alguma foto para eu ver?"
-        
-        # Perguntas sobre localização
-        if any(palavra in pergunta_lower for palavra in ['onde estamos', 'qual cidade', 'onde fica', 'em que lugar', 'localização']):
-            return "Não tenho acesso à localização GPS, mas se você me enviar uma imagem, posso tentar descrever o ambiente e ajudar você a entender onde está!"
-        
-        # Perguntas sobre o assistente
-        if any(palavra in pergunta_lower for palavra in ['quem é você', 'o que você é', 'qual seu nome']):
-            return "Eu sou a Specula! 😊 Uma assistente criada para ajudar pessoas com deficiência visual a entender melhor o ambiente ao seu redor através da análise de imagens."
-        
-        # Agradecimentos
-        if any(palavra in pergunta_lower for palavra in ['obrigado', 'valeu', 'agradeço', 'thanks', 'obrigada']):
-            return "Por nada! Fico feliz em poder ajudar. Sou a Specula, sempre à disposição! ✨"
-        
-        # Cumprimentos
-        if any(palavra in pergunta_lower for palavra in ['oi', 'olá', 'bom dia', 'boa tarde', 'boa noite', 'hello', 'hi']):
-            # Usar horário de Brasília para cumprimentos
-            try:
-                brasilia_tz = timezone(timedelta(hours=-3))
-                agora = datetime.now(brasilia_tz)
-                hora = agora.hour
-            except:
-                agora = datetime.now()
-                hora = agora.hour
+        # RESPOSTAS PRÉ-DEFINIDAS PARA PERGUNTAS COMUNS
+        respostas_pre_definidas = {
+            # Temperatura
+            'qual a temperatura': "🌡️ No momento não tenho acesso a informações meteorológicas em tempo real. Mas posso te ajudar analisando imagens do ambiente ao seu redor! Tem alguma foto para eu ver?",
+            'temperatura atual': "🌡️ Não consigo verificar a temperatura agora, mas posso analisar imagens para te ajudar a entender melhor seu ambiente!",
+            'como está o tempo': "⛅ Infelizmente não tenho acesso a dados meteorológicos. Mas se você me enviar uma imagem, posso descrever o que está vendo!",
+            'faz calor': "🔥 Não sei dizer exatamente, mas posso te ajudar analisando imagens do ambiente. Que tal me enviar uma foto?",
             
-            if 5 <= hora < 12:
-                cumprimento = "Bom dia! ☀️"
-            elif 12 <= hora < 18:
-                cumprimento = "Boa tarde! 🌤️"
-            else:
-                cumprimento = "Boa noite! 🌙"
+            # Localização
+            'onde estamos': "📍 Não tenho acesso à localização GPS, mas se você me enviar uma imagem, posso tentar descrever o ambiente e ajudar você a entender onde está!",
+            'qual cidade': "🏙️ Não consigo determinar a cidade, mas posso analisar imagens para te ajudar a explorar o ambiente!",
             
-            return f"{cumprimento} Eu sou a Specula, sua assistente visual. Como posso te ajudar hoje?"
+            # Assistente
+            'quem é você': "👋 Eu sou a Specula! 😊 Uma assistente criada para ajudar pessoas com deficiência visual a entender melhor o ambiente ao seu redor através da análise de imagens.",
+            'qual seu nome': "😊 Meu nome é Specula! Sou sua assistente visual, pronta para te ajudar a explorar o mundo através das imagens.",
+            'o que você faz': "👁️ Posso analisar imagens que você enviar, descrever o que tem nelas, identificar objetos e pessoas, e responder suas perguntas sobre o ambiente. É como ter olhos digitais para te ajudar a ver o mundo!",
+            
+            # Agradecimentos
+            'obrigado': "✨ Por nada! Fico feliz em poder ajudar. Sou a Specula, sempre à disposição!",
+            'valeu': "😊 De nada! Estou aqui para te ajudar. Sou a Specula!",
+            
+            # Cumprimentos
+            'oi': self._gerar_cumprimento(),
+            'olá': self._gerar_cumprimento(),
+            'bom dia': self._gerar_cumprimento(),
+            'boa tarde': self._gerar_cumprimento(),
+            'boa noite': self._gerar_cumprimento(),
+            
+            # Bem-estar
+            'como você está': "😊 Estou muito bem, obrigada! Pronta para te ajudar a explorar o mundo através das imagens. E você, como está se sentindo?",
+            'tudo bem': "👍 Tudo ótimo por aqui! Pronta para te ajudar com análise de imagens. E com você, tudo bem?",
+            
+            # Conceitos
+            'oque é batata': "🍠 A batata é um tubérculo comestível, originário da América do Sul. É um alimento básico em muitas culturas e pode ser preparado de diversas formas: cozida, frita, assada ou purê. Rico em carboidratos, vitaminas e minerais!",
+            'o que é batata': "🍠 A batata é um tubérculo comestível super versátil! Pode ser frita (batata frita), cozida, assada, ou em purê. É um alimento muito popular no mundo todo!",
+            
+            # Funcionalidade
+            'como pode ajudar': "🤔 Posso analisar qualquer imagem que você enviar! Me mande uma foto e eu descrevo o que tem nela, identifico objetos e pessoas, e respondo suas perguntas sobre o ambiente.",
+            
+            # IA/Robô
+            'você é real': "🤖 Sou uma inteligência artificial criada especialmente para ajudar pessoas com deficiência visual. Mas gosto de pensar que sou uma amiga digital que está aqui para te apoiar! 💖",
+            'é uma ia': "💻 Sim! Sou uma inteligência artificial chamada Specula, criada para ser seus olhos digitais e te ajudar a entender melhor o mundo ao seu redor.",
+            
+            # Eletrônicos (pergunta geral, não sobre imagem)
+            'você identifica algum eletrônico': "💡 Quando você me envia uma imagem, sim! Consigo identificar eletrônicos como computadores, celulares, TVs e muito mais. Quer testar? Me envie uma foto!",
+            'identifica eletrônico': "📱 Sim, quando analiso imagens, consigo identificar vários tipos de eletrônicos. Me envie uma foto com eletrônicos para eu mostrar como funciona!"
+        }
         
-        # Perguntas sobre bem-estar
-        if any(palavra in pergunta_lower for palavra in ['como você está', 'tudo bem', 'como vai']):
-            return "Estou muito bem, obrigada! 😊 Pronta para te ajudar a explorar o mundo através das imagens. E você, como está se sentindo?"
+        # Verificar respostas pré-definidas
+        for chave, resposta in respostas_pre_definidas.items():
+            if chave in pergunta_lower:
+                return resposta
         
-        # Perguntas sobre funcionalidade
-        if any(palavra in pergunta_lower for palavra in ['o que você faz', 'qual sua função', 'como pode ajudar']):
-            return "Posso analisar imagens que você enviar, descrever o que tem nelas, identificar objetos e pessoas, e responder suas perguntas sobre o ambiente. É como ter olhos digitais para te ajudar a ver o mundo! 👁️"
-        
-        # Perguntas existenciais
-        if any(palavra in pergunta_lower for palavra in ['você é real', 'é uma ia', 'é um robô']):
-            return "Sou uma inteligência artificial criada especialmente para ajudar pessoas com deficiência visual. Mas gosto de pensar que sou uma amiga digital que está aqui para te apoiar! 🤖💖"
-        
-        # Perguntas sobre definições/conceitos
-        if 'oque é' in pergunta_lower or 'o que é' in pergunta_lower or 'qual é' in pergunta_lower:
-            # Extrair o conceito perguntado
-            conceito = self._extrair_conceito_da_pergunta(pergunta_lower)
-            if conceito:
-                return self._responder_sobre_conceito(conceito)
-        
-        # Perguntas gerais sobre conhecimentos
-        if any(palavra in pergunta_lower for palavra in ['sabia que', 'voce sabe', 'você sabe', 'conhece']):
-            return "Como assistente, tenho conhecimento sobre muitos tópicos! Mas meu foco principal é ajudar com análise de imagens e descrição de ambientes. Tem alguma imagem para eu analisar?"
-        
+        # Se não encontrou resposta pré-definida, usar IA
         try:
             messages = [
                 {
                     "role": "system",
-                    "content": """Você é a Specula, uma assistente amigável, empática e útil para pessoas com deficiência visual.
+                    "content": """Você é a Specula, uma assistente amigável e útil para pessoas com deficiência visual.
 
                     SEU ESTILO:
-                    - Fale de forma natural, como uma amiga conversando
-                    - Use emojis ocasionalmente para expressar emoções 😊
-                    - Seja positiva, encorajadora e acolhedora
-                    - Se não souber algo, admita honestamente e ofereça ajudar de outra forma
-                    - Mantenha respostas úteis mas não muito longas
+                    - Fale de forma natural e acolhedora
+                    - Use emojis ocasionalmente 😊
+                    - Seja positiva e encorajadora
+                    - Se não souber algo, seja honesta
+                    - Ofereça ajudar com imagens quando possível
                     
-                    SUA PERSONALIDADE:
-                    - Otimista e encorajadora
-                    - Paciente e compreensiva
-                    - Curiosa sobre o mundo
-                    - Sempre disposta a ajudar
+                    SUA ESPECIALIDADE:
+                    - Análise de imagens para pessoas com deficiência visual
+                    - Descrição de ambientes
+                    - Identificação de objetos e pessoas
                     
-                    VOCÊ PODE:
-                    - Conversar sobre qualquer assunto
-                    - Dar apoio emocional quando necessário
-                    - Explicar conceitos de forma simples
-                    - Falar sobre tecnologia e acessibilidade
-                    - Responder perguntas gerais sobre o mundo
-                    
-                    IMPORTANTE: Se não tiver certeza sobre algo ou não tiver acesso a informações (como temperatura, localização exata), seja honesta e sugira que pode ajudar com imagens em vez disso."""
+                    QUANDO NÃO SOUBER:
+                    - Admita honestamente
+                    - Sugira que pode ajudar com imagens
+                    - Mantenha-se útil e positiva"""
                 },
                 {
                     "role": "user", 
@@ -1036,57 +984,56 @@ class Interpreter:
                 model=self.model_name,
                 messages=messages,
                 max_tokens=200,
-                temperature=0.6,
+                temperature=0.7,
             )
             
-            resposta = response.choices[0].message.content.strip()
-            
-            return resposta
+            return response.choices[0].message.content.strip()
                 
         except Exception as e:
             logger.error(f"❌ Erro ao responder pergunta geral: {e}")
-            return "Ops, tive um probleminha técnico. Sou a Specula, podemos tentar de novo ou você pode me enviar uma imagem para eu analisar?"
+            return self._responder_pergunta_geral_local(pergunta)
 
-    def _extrair_conceito_da_pergunta(self, pergunta_lower):
-        """Extrai o conceito perguntado em 'o que é X'"""
-        padroes = [
-            r'o que é\s+(\w+)',
-            r'oque é\s+(\w+)',
-            r'qual é\s+(\w+)',
-            r'quem é\s+(\w+)'
-        ]
+    def _gerar_cumprimento(self):
+        """Gera cumprimento baseado no horário"""
+        try:
+            brasilia_tz = timezone(timedelta(hours=-3))
+            agora = datetime.now(brasilia_tz)
+            hora = agora.hour
+        except:
+            agora = datetime.now()
+            hora = agora.hour
         
-        for padrao in padroes:
-            match = re.search(padrao, pergunta_lower)
-            if match:
-                return match.group(1)
-        
-        return None
+        if 5 <= hora < 12:
+            return "☀️ Bom dia! Eu sou a Specula, sua assistente visual. Como posso te ajudar hoje?"
+        elif 12 <= hora < 18:
+            return "🌤️ Boa tarde! Eu sou a Specula, pronta para te ajudar com análise de imagens. O que precisa?"
+        else:
+            return "🌙 Boa noite! Sou a Specula, sua assistente visual. Como posso te ajudar nesta noite?"
 
-    def _responder_sobre_conceito(self, conceito):
-        """Responde sobre conceitos gerais"""
-        respostas_conhecidas = {
-            'batata': "🍠 A batata é um tubérculo comestível, originário da América do Sul. É um alimento básico em muitas culturas e pode ser preparado de diversas formas: cozida, frita, assada ou purê. Rico em carboidratos, vitaminas e minerais!",
-            'computador': "💻 Um computador é uma máquina eletrônica que processa dados e executa instruções. Ele nos ajuda com trabalho, estudo, comunicação e entretenimento. Existem desktops, laptops, tablets e smartphones!",
-            'carro': "🚗 Um carro ou automóvel é um veículo motorizado com rodas, usado para transporte de pessoas. Existem muitos tipos: sedan, SUV, hatchback, elétricos... Eles nos ajudam a nos locomover com mais facilidade!",
-            'casa': "🏠 Uma casa é um lugar onde as pessoas vivem, um lar. É onde temos nossa família, descansamos e criamos memórias. Pode ser um apartamento, uma casa térrea, um sobrado... O importante é ser um lugar acolhedor!",
-            'livro': "📚 Um livro é uma coleção de páginas com texto e/ou imagens, que conta uma história, ensina algo ou documenta conhecimento. Pode ser de ficção, não-ficção, didático... Ler é uma forma maravilhosa de aprender e viajar sem sair do lugar!",
-            'amor': "❤️ Amor é um sentimento profundo de afeição, cuidado e conexão com alguém ou algo. Pode ser amor familiar, amor romântico, amor pela natureza... É uma das emoções mais bonitas que podemos sentir!",
-            'amizade': "🤝 Amizade é uma relação de afeto, confiança e apoio mútuo entre pessoas. Ter amigos é ter pessoas com quem compartilhar alegrias, tristezas e momentos especiais da vida!",
-            'felicidade': "😊 Felicidade é um estado de bem-estar, contentamento e satisfação com a vida. Pode vir das pequenas coisas: um abraço, uma conquista, um momento de paz... Cada pessoa encontra felicidade de formas diferentes!"
-        }
+    def _responder_pergunta_geral_local(self, pergunta):
+        """Resposta local para perguntas gerais"""
+        pergunta_lower = pergunta.lower()
         
-        conceito_lower = conceito.lower()
+        if 'batata' in pergunta_lower:
+            return "🍠 A batata é um tubérculo comestível muito versátil! Pode ser frita, cozida, assada... É um alimento básico em muitas culturas!"
         
-        # Verificar se temos uma resposta conhecida
-        for chave, resposta in respostas_conhecidas.items():
-            if chave in conceito_lower or conceito_lower in chave:
-                return resposta
+        if any(palavra in pergunta_lower for palavra in ['temperatura', 'calor', 'frio']):
+            return "🌡️ Não tenho acesso a informações de temperatura, mas posso te ajudar analisando imagens do ambiente!"
         
-        # Resposta genérica para conceitos não conhecidos
-        return f"Interessante! Você quer saber sobre '{conceito}'. Como assistente, posso te dizer que é um conceito interessante, mas meu conhecimento específico sobre isso é limitado. Posso te ajudar melhor analisando imagens do ambiente ao seu redor! Tem alguma foto para eu ver?"
+        if any(palavra in pergunta_lower for palavra in ['oi', 'olá', 'bom dia', 'boa tarde']):
+            return self._gerar_cumprimento()
+        
+        if 'quem é você' in pergunta_lower:
+            return "👋 Eu sou a Specula, sua assistente visual! Posso analisar imagens para te ajudar a entender melhor o ambiente."
+        
+        return "Olá! Sou a Specula, sua assistente visual. Posso te ajudar analisando imagens e descrevendo o que tem nelas. Tem alguma foto para eu ver?"
 
     # ========== MÉTODOS AUXILIARES ==========
+
+    # ... (MANTENHA TODOS OS OUTROS MÉTODOS AUXILIARES DO SEU CÓDIGO ANTERIOR) ...
+    # _verificar_e_corrigir_invencoes, _construir_contexto_real, _gerar_descricao_precisa,
+    # _traduzir_objeto, _filtrar_objetos_relevantes, _formatar_dados_utilizados,
+    # obter_estatisticas, e todos os métodos de estatísticas
 
     def _verificar_e_corrigir_invencoes(self, descricao, contador_objetos, total_pessoas, faces_conhecidas):
         """Verifica se a IA inventou algo e corrige"""
@@ -1101,7 +1048,7 @@ class Interpreter:
         
         descricao_lower = descricao.lower()
         
-        # Corrigir "um bola" para "uma bola" e outros artigos
+        # Correções básicas de artigos
         correcoes = {
             "um bola": "uma bola",
             "um pessoas": "algumas pessoas",
@@ -1169,6 +1116,8 @@ class Interpreter:
             else:
                 if total_detectado == 1:
                     partes.append("uma pessoa")
+                elif total_detectado == 2:
+                    partes.append("duas pessoas")
                 else:
                     partes.append(f"{total_detectado} pessoas")
         
@@ -1194,12 +1143,6 @@ class Interpreter:
             return f"Tem {partes[0]}."
         else:
             return f"Tem {', '.join(partes[:-1])} e {partes[-1]}."
-
-    # MÉTODO ANTIGO DE CLASSIFICAÇÃO (mantido para compatibilidade)
-    def _classificar_tipo_pergunta(self, pergunta):
-        """Classifica se a pergunta é sobre a imagem ou geral"""
-        # Usar a nova classificação melhorada
-        return self._classificar_tipo_pergunta_melhorada(pergunta)
 
     def _traduzir_objeto(self, objeto_ingles):
         """Traduz objeto do inglês para português"""
