@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO FINAL SPECULA CORRIGIDA com fuso horário e artigos corretos
+Interpreter - VERSÃO FINAL ATUALIZADA com YOLO e análises inteligentes
 """
 
 import logging
@@ -94,12 +94,12 @@ class Interpreter:
         if not self.client:
             return "Vou descrever o ambiente para você. Sou a Specula, sua assistente visual."
         
-        # Preparar dados REAIS
-        objetos_filtrados = self._filtrar_objetos_relevantes(
-            [obj.get('name', '') for obj in (objetos_detectados or [])]
-        )
+        # Preparar dados REAIS do YOLO e faces
+        objetos_filtrados = self._filtrar_objetos_relevantes_yolo(objetos_detectados or [])
         
-        contador_objetos = Counter(objetos_filtrados)
+        # Obter contador de objetos detectados
+        contador_objetos = self._contar_objetos_yolo(objetos_filtrados)
+        
         total_pessoas = len(faces_nomes or [])
         faces_conhecidas = [nome for nome in (faces_nomes or []) if nome != 'Desconhecido']
         
@@ -108,7 +108,7 @@ class Interpreter:
             return "Olha, parece um ambiente bem simples ou vazio. Não estou identificando muitos objetos ou pessoas. Sou a Specula, sua assistente!"
         
         # Construir contexto APENAS com o que foi realmente detectado
-        contexto_real = self._construir_contexto_real(contador_objetos, total_pessoas, faces_conhecidas)
+        contexto_real = self._construir_contexto_real_yolo(contador_objetos, total_pessoas, faces_conhecidas)
         
         try:
             messages = [
@@ -160,7 +160,7 @@ class Interpreter:
                 
         except Exception as e:
             logger.error(f"❌ Erro ao gerar descrição natural: {e}")
-            return self._gerar_descricao_precisa(contador_objetos, total_pessoas, faces_conhecidas)
+            return self._gerar_descricao_precisa_yolo(contador_objetos, total_pessoas, faces_conhecidas)
 
     # ========== MÉTODO PRINCIPAL PARA /perguntar ==========
 
@@ -192,7 +192,7 @@ class Interpreter:
         
         if tipo_pergunta == "sobre_imagem":
             # Pergunta sobre a imagem - usar dados detectados
-            resposta = self._responder_sobre_imagem_corrigida(pergunta, objetos_detectados, faces_nomes)
+            resposta = self._responder_sobre_imagem_yolo(pergunta, objetos_detectados, faces_nomes)
             correlacao = True
         else:
             # Pergunta geral - responder de forma natural
@@ -209,7 +209,7 @@ class Interpreter:
             'resposta': resposta,
             'tipo_pergunta': tipo_pergunta,
             'correlacao_com_imagem': correlacao,
-            'dados_utilizados': self._formatar_dados_utilizados(objetos_detectados, faces_nomes) if correlacao else "Pergunta geral"
+            'dados_utilizados': self._formatar_dados_utilizados_yolo(objetos_detectados, faces_nomes) if correlacao else "Pergunta geral"
         }
 
     # ========== MÉTODO PARA VERIFICAR PERGUNTAS DE TEMPO ==========
@@ -298,43 +298,39 @@ class Interpreter:
         
         return None
 
-    # ========== MÉTODO CORRIGIDO PARA RESPONDER SOBRE IMAGEM ==========
+    # ========== MÉTODO ATUALIZADO PARA YOLO ==========
 
-    def _responder_sobre_imagem_corrigida(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Responde de forma CORRIGIDA, com artigos certos e análises apropriadas"""
-        # Preparar dados REAIS
-        objetos_filtrados = []
-        if objetos_detectados:
-            for obj in objetos_detectados:
-                nome = obj.get('name', '')
-                count = obj.get('count', 1)
-                for _ in range(count):
-                    objetos_filtrados.append(nome)
+    def _responder_sobre_imagem_yolo(self, pergunta, objetos_detectados=None, faces_nomes=None):
+        """Responde de forma CORRIGIDA, com artigos certos e análises apropriadas usando dados do YOLO"""
+        # Preparar dados REAIS do YOLO
+        objetos_filtrados = self._filtrar_objetos_relevantes_yolo(objetos_detectados or [])
         
-        contador_objetos = Counter(objetos_filtrados)
+        # Obter contador de objetos detectados
+        contador_objetos = self._contar_objetos_yolo(objetos_filtrados)
+        
         total_pessoas = len(faces_nomes or [])
         faces_conhecidas = [nome for nome in (faces_nomes or []) if nome != 'Desconhecido']
         
         # DEBUG: Mostrar o que foi realmente detectado
-        logger.info(f"📊 Dados reais detectados: {dict(contador_objetos)}, Pessoas: {total_pessoas}, Faces conhecidas: {faces_conhecidas}")
+        logger.info(f"📊 Dados YOLO detectados: {dict(contador_objetos)}, Pessoas: {total_pessoas}, Faces conhecidas: {faces_conhecidas}")
         
         # Se temos OpenAI, usar para resposta corrigida
         if self.client:
-            return self._responder_com_ia_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_com_ia_corrigida_yolo(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
         else:
-            return self._responder_base_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_base_corrigida_yolo(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
 
-    def _responder_com_ia_corrigida(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
+    def _responder_com_ia_corrigida_yolo(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
         """Resposta corrigida usando IA - com artigos corretos e análises"""
         try:
             # Construir lista PRECISA do que foi detectado
-            dados_reais = self._construir_dados_reais_precisos(contador_objetos, total_pessoas, faces_conhecidas)
+            dados_reais = self._construir_dados_reais_precisos_yolo(contador_objetos, total_pessoas, faces_conhecidas)
             
             # Analisar o tipo de ambiente baseado nos objetos
-            analise_ambiente = self._analisar_tipo_ambiente(contador_objetos)
+            analise_ambiente = self._analisar_tipo_ambiente_yolo(contador_objetos)
             
             # Preparar contexto sobre artigos para ajudar a IA
-            artigos_contexto = self._preparar_contexto_artigos(contador_objetos)
+            artigos_contexto = self._preparar_contexto_artigos_yolo(contador_objetos)
             
             messages = [
                 {
@@ -390,9 +386,9 @@ class Interpreter:
             
         except Exception as e:
             logger.error(f"❌ Erro ao responder com IA: {e}")
-            return self._responder_base_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_base_corrigida_yolo(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
 
-    def _preparar_contexto_artigos(self, contador_objetos):
+    def _preparar_contexto_artigos_yolo(self, contador_objetos):
         """Prepara contexto sobre artigos para ajudar a IA"""
         artigos = []
         
@@ -453,8 +449,8 @@ class Interpreter:
         
         return resposta_corrigida
 
-    def _analisar_tipo_ambiente(self, contador_objetos):
-        """Analisa o tipo de ambiente baseado nos objetos detectados"""
+    def _analisar_tipo_ambiente_yolo(self, contador_objetos):
+        """Analisa o tipo de ambiente baseado nos objetos detectados pelo YOLO"""
         objetos_detectados = list(contador_objetos.keys())
         
         # Objetos típicos de ambientes internos
@@ -482,11 +478,11 @@ class Interpreter:
         else:
             return "ANÁLISE: Difícil determinar se é interno ou externo apenas pelos objetos detectados."
 
-    def _construir_dados_reais_precisos(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Constrói lista precisa do que foi realmente detectado"""
+    def _construir_dados_reais_precisos_yolo(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Constrói lista precisa do que foi realmente detectado pelo YOLO"""
         partes = []
         
-        # Pessoas
+        # Pessoas do YOLO
         pessoas_yolo = contador_objetos.get('person', 0)
         total_detectado = max(total_pessoas, pessoas_yolo)
         
@@ -499,7 +495,7 @@ class Interpreter:
                 else:
                     partes.append(f"Pessoas: {total_detectado} pessoas")
         
-        # Objetos detectados (traduzidos)
+        # Objetos detectados pelo YOLO (traduzidos)
         outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
         if outros_objetos:
             objetos_traduzidos = []
@@ -517,16 +513,16 @@ class Interpreter:
         
         return " | ".join(partes)
 
-    def _responder_base_corrigida(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
+    def _responder_base_corrigida_yolo(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
         """Resposta base corrigida - com artigos corretos e análises apropriadas"""
         pergunta_lower = pergunta.lower()
         
-        # Dados reais
+        # Dados reais do YOLO
         pessoas_yolo = contador_objetos.get('person', 0)
         total_pessoas_reais = max(total_pessoas, pessoas_yolo)
         objetos_reais = {k: v for k, v in contador_objetos.items() if k != 'person'}
         
-        # Lista de objetos detectados (em português)
+        # Lista de objetos detectados pelo YOLO (em português)
         objetos_pt = {self._traduzir_objeto(obj): qtd for obj, qtd in objetos_reais.items()}
         
         # PERGUNTA: "O que tem nessa imagem?" ou "Descreva o ambiente"
@@ -543,7 +539,7 @@ class Interpreter:
         
         # PERGUNTA: "Esta foto parece ser interna ou externa?"
         elif any(palavra in pergunta_lower for palavra in ['interno', 'externo', 'dentro', 'fora']):
-            return self._analisar_interno_externo_inteligente(contador_objetos)
+            return self._analisar_interno_externo_inteligente_yolo(contador_objetos)
         
         # PERGUNTA sobre objetos específicos
         for objeto_pergunta in ['cadeira', 'sofá', 'mesa', 'cama', 'computador', 'tv', 'televisão', 
@@ -665,8 +661,8 @@ class Interpreter:
         else:
             return "Não estou vendo objetos específicos."
 
-    def _analisar_interno_externo_inteligente(self, contador_objetos):
-        """Analisa se é interno ou externo de forma mais inteligente"""
+    def _analisar_interno_externo_inteligente_yolo(self, contador_objetos):
+        """Analisa se é interno ou externo de forma mais inteligente baseado nos dados do YOLO"""
         objetos_detectados = list(contador_objetos.keys())
         
         # Se tem bola e pessoas, provavelmente é externo (esportes)
@@ -828,7 +824,7 @@ class Interpreter:
             logger.error(f"❌ Erro ao responder pergunta geral: {e}")
             return "Ops, tive um probleminha técnico. Sou a Specula, podemos tentar de novo ou você pode me enviar uma imagem para eu analisar?"
 
-    # ========== MÉTODOS AUXILIARES ==========
+    # ========== MÉTODOS AUXILIARES ATUALIZADOS PARA YOLO ==========
 
     def _verificar_e_corrigir_invencoes(self, descricao, contador_objetos, total_pessoas, faces_conhecidas):
         """Verifica se a IA inventou algo e corrige"""
@@ -861,12 +857,12 @@ class Interpreter:
         
         palavras_vazias = ['nada', 'vazio', 'não tem nada', 'sem nada', 'nenhum']
         if any(palavra in descricao_lower for palavra in palavras_vazias) and (total_detectado > 0 or objetos_reais_pt):
-            return self._gerar_descricao_precisa(contador_objetos, total_pessoas, faces_conhecidas)
+            return self._gerar_descricao_precisa_yolo(contador_objetos, total_pessoas, faces_conhecidas)
         
         return descricao
 
-    def _construir_contexto_real(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Constrói contexto apenas com dados reais"""
+    def _construir_contexto_real_yolo(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Constrói contexto apenas com dados reais do YOLO"""
         partes = []
         
         pessoas_yolo = contador_objetos.get('person', 0)
@@ -895,8 +891,8 @@ class Interpreter:
         
         return " | ".join(partes)
 
-    def _gerar_descricao_precisa(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Gera descrição precisa baseada apenas nos dados"""
+    def _gerar_descricao_precisa_yolo(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Gera descrição precisa baseada apenas nos dados do YOLO"""
         partes = []
         
         pessoas_yolo = contador_objetos.get('person', 0)
@@ -992,23 +988,32 @@ class Interpreter:
                 return pt
         return objeto_ingles
 
-    def _filtrar_objetos_relevantes(self, objetos_detectados):
-        """Filtra apenas objetos que conhecemos"""
+    def _filtrar_objetos_relevantes_yolo(self, objetos_detectados):
+        """Filtra apenas objetos que conhecemos dos dados do YOLO"""
         objetos_filtrados = []
         todos_objetos = [obj for lista in self.objetos_conhecidos.values() for obj in lista]
         
         for obj in objetos_detectados:
-            if obj.lower() in todos_objetos:
-                objetos_filtrados.append(obj)
+            if isinstance(obj, dict):
+                nome = obj.get('name', '')
+            else:
+                nome = str(obj)
+            
+            if nome.lower() in todos_objetos:
+                objetos_filtrados.append(nome)
         
         return objetos_filtrados
 
-    def _formatar_dados_utilizados(self, objetos_detectados, faces_nomes):
+    def _contar_objetos_yolo(self, objetos_filtrados):
+        """Conta objetos detectados pelo YOLO"""
+        return Counter(objetos_filtrados)
+
+    def _formatar_dados_utilizados_yolo(self, objetos_detectados, faces_nomes):
         """Formata dados utilizados para resposta"""
         objetos_count = len(objetos_detectados or [])
         faces_count = len(faces_nomes or [])
         
-        return f"{objetos_count} objetos e {faces_count} pessoas analisadas"
+        return f"{objetos_count} objetos YOLO e {faces_count} pessoas analisadas"
 
     # ========== MÉTODO PARA /estatistica ==========
 
@@ -1020,15 +1025,15 @@ class Interpreter:
         
         start_time = time.time()
         
-        # Processar objetos detectados
-        objetos_processados = self._processar_objetos_estatisticas(objetos_detectados)
+        # Processar objetos detectados pelo YOLO
+        objetos_processados = self._processar_objetos_estatisticas_yolo(objetos_detectados)
         faces_processadas = self._processar_faces_estatisticas(faces_detectadas or [])
         
         # Calcular métricas de precisão
-        metricas_precisao = self._calcular_metricas_precisao(objetos_detectados, faces_detectadas)
+        metricas_precisao = self._calcular_metricas_precisao_yolo(objetos_detectados, faces_detectadas)
         
         # Gerar análise técnica
-        analise_tecnica = self._gerar_analise_tecnica(objetos_processados, faces_processadas)
+        analise_tecnica = self._gerar_analise_tecnica_yolo(objetos_processados, faces_processadas)
         
         processing_time = time.time() - start_time
         
@@ -1039,7 +1044,7 @@ class Interpreter:
             'contagens': {
                 'total_objetos': len(objetos_detectados),
                 'total_faces': len(faces_detectadas or []),
-                'objetos_por_categoria': self._agrupar_objetos_por_categoria(objetos_detectados),
+                'objetos_por_categoria': self._agrupar_objetos_por_categoria_yolo(objetos_detectados),
                 'faces_conhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') != 'Desconhecido']),
                 'faces_desconhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') == 'Desconhecido'])
             },
@@ -1049,20 +1054,26 @@ class Interpreter:
                 'faces': faces_processadas
             },
             'analise_tecnica': analise_tecnica,
-            'logs_diagnostico': self._gerar_logs_diagnostico(objetos_detectados, faces_detectadas)
+            'logs_diagnostico': self._gerar_logs_diagnostico_yolo(objetos_detectados, faces_detectadas)
         }
 
-    # ========== MÉTODOS DE ESTATÍSTICAS ==========
+    # ========== MÉTODOS DE ESTATÍSTICAS ATUALIZADOS ==========
 
-    def _processar_objetos_estatisticas(self, objetos_detectados):
-        """Processa objetos para estatísticas detalhadas"""
+    def _processar_objetos_estatisticas_yolo(self, objetos_detectados):
+        """Processa objetos do YOLO para estatísticas detalhadas"""
         objetos_processados = []
         
         for i, obj in enumerate(objetos_detectados, 1):
-            nome_ingles = obj.get('name', 'desconhecido')
-            confianca = obj.get('confidence', 0)
-            bbox = obj.get('bbox', {})
-            count = obj.get('count', 1)
+            if isinstance(obj, dict):
+                nome_ingles = obj.get('name', 'desconhecido')
+                confianca = obj.get('confidence', 0)
+                bbox = obj.get('bbox', {})
+                count = obj.get('count', 1)
+            else:
+                nome_ingles = str(obj)
+                confianca = 0.8  # Default para YOLO
+                bbox = {}
+                count = 1
             
             objeto_info = {
                 'id': i,
@@ -1071,7 +1082,7 @@ class Interpreter:
                 'confianca': confianca,
                 'confianca_percentual': f"{confianca:.1%}",
                 'quantidade': count,
-                'categoria': self._classificar_categoria(nome_ingles),
+                'categoria': self._classificar_categoria_yolo(nome_ingles),
                 'coordenadas': bbox,
                 'area': bbox.get('width', 0) * bbox.get('height', 0) if bbox else 0,
                 'nivel_confianca': self._classificar_nivel_confianca(confianca)
@@ -1103,9 +1114,15 @@ class Interpreter:
         
         return faces_processadas
 
-    def _calcular_metricas_precisao(self, objetos_detectados, faces_detectadas):
-        """Calcula métricas de precisão detalhadas"""
-        confiancas_objetos = [obj.get('confidence', 0) for obj in objetos_detectados]
+    def _calcular_metricas_precisao_yolo(self, objetos_detectados, faces_detectadas):
+        """Calcula métricas de precisão detalhadas para YOLO"""
+        confiancas_objetos = []
+        for obj in objetos_detectados:
+            if isinstance(obj, dict):
+                confiancas_objetos.append(obj.get('confidence', 0))
+            else:
+                confiancas_objetos.append(0.8)  # Default para YOLO
+        
         confiancas_faces = [face.get('confidence', 0) for face in (faces_detectadas or [])]
         
         def calcular_media(lista):
@@ -1128,8 +1145,8 @@ class Interpreter:
             'objetos_baixa_confianca': len([c for c in confiancas_objetos if c < 0.3])
         }
 
-    def _gerar_analise_tecnica(self, objetos_processados, faces_processadas):
-        """Gera análise técnica dos dados"""
+    def _gerar_analise_tecnica_yolo(self, objetos_processados, faces_processadas):
+        """Gera análise técnica dos dados do YOLO"""
         total_objetos = len(objetos_processados)
         total_faces = len(faces_processadas)
         
@@ -1142,7 +1159,7 @@ class Interpreter:
             categorias = Counter([obj['categoria'] for obj in objetos_processados])
             categoria_principal = categorias.most_common(1)[0][0] if categorias else "diversos"
             total_itens = sum(obj.get('quantidade', 1) for obj in objetos_processados)
-            analise.append(f"{total_itens} itens detectados ({total_objetos} tipos), predominância: {categoria_principal}")
+            analise.append(f"{total_itens} itens detectados pelo YOLO ({total_objetos} tipos), predominância: {categoria_principal}")
         
         if total_faces > 0:
             faces_conhecidas = len([f for f in faces_processadas if f['tipo'] == 'conhecida'])
@@ -1153,20 +1170,25 @@ class Interpreter:
         
         return ". ".join(analise)
 
-    def _agrupar_objetos_por_categoria(self, objetos_detectados):
-        """Agrupa objetos por categoria"""
+    def _agrupar_objetos_por_categoria_yolo(self, objetos_detectados):
+        """Agrupa objetos do YOLO por categoria"""
         categorias = {}
         for obj in objetos_detectados:
-            nome = obj.get('name', 'desconhecido')
-            count = obj.get('count', 1)
-            categoria = self._classificar_categoria(nome)
+            if isinstance(obj, dict):
+                nome = obj.get('name', 'desconhecido')
+                count = obj.get('count', 1)
+            else:
+                nome = str(obj)
+                count = 1
+            
+            categoria = self._classificar_categoria_yolo(nome)
             if categoria not in categorias:
                 categorias[categoria] = 0
             categorias[categoria] += count
         return categorias
 
-    def _classificar_categoria(self, objeto_ingles):
-        """Classifica objeto em categoria"""
+    def _classificar_categoria_yolo(self, objeto_ingles):
+        """Classifica objeto do YOLO em categoria"""
         categorias = {
             'móveis': ['chair', 'couch', 'sofa', 'bed', 'table', 'dining table', 'desk', 'office chair'],
             'pessoas': ['person', 'people', 'human'],
@@ -1197,18 +1219,31 @@ class Interpreter:
         else:
             return "baixa"
 
-    def _gerar_logs_diagnostico(self, objetos_detectados, faces_detectadas):
-        """Gera logs para diagnóstico técnico"""
+    def _gerar_logs_diagnostico_yolo(self, objetos_detectados, faces_detectadas):
+        """Gera logs para diagnóstico técnico do YOLO"""
         logs = []
         
-        confiancas_obj = [obj.get('confidence', 0) for obj in objetos_detectados]
+        confiancas_obj = []
+        for obj in objetos_detectados:
+            if isinstance(obj, dict):
+                confiancas_obj.append(obj.get('confidence', 0))
+            else:
+                confiancas_obj.append(0.8)
+        
         if confiancas_obj:
             avg = sum(confiancas_obj)/len(confiancas_obj) if confiancas_obj else 0
-            logs.append(f"Confiança objetos: min={min(confiancas_obj):.2f}, max={max(confiancas_obj):.2f}, avg={avg:.2f}")
+            logs.append(f"Confiança objetos YOLO: min={min(confiancas_obj):.2f}, max={max(confiancas_obj):.2f}, avg={avg:.2f}")
         
-        tipos_objetos = Counter([obj.get('name', 'desconhecido') for obj in objetos_detectados])
+        tipos_objetos = Counter()
+        for obj in objetos_detectados:
+            if isinstance(obj, dict):
+                nome = obj.get('name', 'desconhecido')
+            else:
+                nome = str(obj)
+            tipos_objetos[nome] += 1
+        
         if tipos_objetos:
-            logs.append(f"Tipos objetos: {dict(tipos_objetos)}")
+            logs.append(f"Tipos objetos YOLO: {dict(tipos_objetos)}")
         
         if faces_detectadas:
             faces_conhecidas = len([f for f in faces_detectadas if f.get('name', 'Desconhecido') != 'Desconhecido'])
