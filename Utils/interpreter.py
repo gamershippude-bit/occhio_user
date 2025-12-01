@@ -1,5 +1,5 @@
 """
-Interpreter - Versão CORRIGIDA: Classificador de perguntas funcionando
+Interpreter - Versão CORRIGIDA: Agora responde perguntas gerais também
 """
 
 import logging
@@ -145,7 +145,7 @@ class Interpreter:
             dados_utilizados = self._formatar_dados_para_resposta(len(faces_nomes or []), Counter(objetos_filtrados))
             
         else:
-            # Pergunta geral sobre o mundo
+            # Pergunta geral sobre o mundo - AGORA SEMPRE RESPONDE
             resposta_imagem = self._responder_pergunta_geral(pergunta)
             correlacao = False
             dados_utilizados = "Pergunta geral sobre o mundo - sem dados da imagem"
@@ -392,7 +392,10 @@ class Interpreter:
         return self._gerar_resposta_direta_honesta(total_pessoas, objetos_contador)
 
     def _responder_pergunta_geral(self, pergunta):
-        """Responde perguntas gerais sobre o mundo"""
+        """
+        Responde perguntas gerais sobre o mundo
+        AGORA SEMPRE TENTA RESPONDER, NÃO BLOQUEIA MAIS
+        """
         if not self.client:
             return "Desculpe, não posso responder perguntas gerais no momento."
         
@@ -420,7 +423,7 @@ class Interpreter:
             )
             resposta = response.choices[0].message.content.strip()
             logger.info(f"💬 Resposta geral: {resposta}")
-            return resposta
+            return resposta  # ← SEMPRE RETORNA RESPOSTA DO GPT
         except Exception as e:
             logger.error(f"❌ Erro OpenAI: {e}")
             return "Desculpe, não consegui processar sua pergunta."

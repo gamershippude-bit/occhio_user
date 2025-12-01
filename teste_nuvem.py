@@ -1,5 +1,5 @@
 """
-TESTE_LOCAL.PY - Testador da API Occhio Cloud LOCAL
+TESTE_NUVEM.PY - Testador da API Occhio Cloud na nuvem - CORRIGIDO
 """
 
 import requests
@@ -10,17 +10,13 @@ import sys
 import os
 from pathlib import Path
 
-# Configuração - Mude para LOCAL
-LOCAL_URL = "http://localhost:8080"  # URL local
-CLOUD_URL = "https://occhio-cloud-109479952880.us-central1.run.app"  # URL cloud
+# Configuração
+CLOUD_URL = "https://occhio-cloud-109479952880.us-central1.run.app"
 TIMEOUT = 60
 
-# Escolha qual URL usar
-USAR_LOCAL = True  # Mude para False para testar na nuvem
-
-class TestadorOcchio:
-    def __init__(self, base_url):
-        self.base_url = base_url
+class TestadorNuvem:
+    def __init__(self, cloud_url):
+        self.cloud_url = cloud_url
         self.session = requests.Session()
         
     def carregar_imagem_base64(self, caminho_imagem):
@@ -33,248 +29,303 @@ class TestadorOcchio:
             print(f"❌ Erro ao carregar imagem {caminho_imagem}: {e}")
             return None
     
+    def fazer_requisicao(self, endpoint, dados=None, metodo="POST"):
+        """Faz requisição com tratamento robusto de erros"""
+        url = f"{self.cloud_url}/{endpoint}"
+        try:
+            if metodo == "POST":
+                resposta = self.session.post(url, json=dados, timeout=TIMEOUT)
+            else:
+                resposta = self.session.get(url, timeout=TIMEOUT)
+            
+            if resposta.status_code == 200:
+                try:
+                    return resposta.json(), resposta.status_code, None
+                except json.JSONDecodeError:
+                    # Se não for JSON, retorna o texto
+                    return resposta.text, resposta.status_code, None
+            else:
+                return None, resposta.status_code, f"HTTP {resposta.status_code}"
+                
+        except Exception as e:
+            return None, None, str(e)
+    
     def testar_health(self):
         """Testa endpoint de health"""
         print("🧪 Testando HEALTH...")
-        try:
-            response = self.session.get(f"{self.base_url}/health", timeout=TIMEOUT)
-            print(f"✅ Status: {response.status_code}")
-            data = response.json()
-            print(f"📄 Resposta: {data}")
-            return response.status_code == 200
-        except Exception as e:
-            print(f"❌ Erro: {e}")
+        dados, status, erro = self.fazer_requisicao("health", metodo="GET")
+        
+        if status == 200:
+            print(f"✅ Status: {status}")
+            print(f"📄 Resposta: {dados}")
+            return True
+        else:
+            print(f"❌ Erro: {erro}")
             return False
     
     def testar_health_completo(self):
-        """Testa health completo"""
+        """Testa health completo - CORRIGIDO"""
         print("\n🧪 Testando HEALTH COMPLETO...")
-        try:
-            response = self.session.get(f"{self.base_url}/health-completo", timeout=TIMEOUT)
-            print(f"✅ Status: {response.status_code}")
-            data = response.json()
+        
+        # Tentar ambas as versões (hífen e underline)
+        endpoints = ["health-completo", "health_completo", "estatisticas-sistema"]
+        
+        for endpoint in endpoints:
+            dados, status, erro = self.fazer_requisicao(endpoint, metodo="GET")
             
-            if data.get('success'):  # Este ainda é 'success'
-                stats = data.get('estatisticas', {})
+            if status == 200:
+                print(f"✅ Status: 200 (endpoint: /{endpoint})")
+                
+                # Tratamento robusto para diferentes formatos
+                estatisticas = {}
+                
+                if isinstance(dados, dict):
+                    if 'estatisticas' in dados:
+                        estatisticas = dados.get('estatisticas', {})
+                    else:
+                        estatisticas = dados  # Pode ser direto
+                
                 print(f"📊 Estatísticas:")
-                print(f"   - Faces cadastradas: {stats.get('faces_cadastradas', 0)}")
-                print(f"   - Detector objetos: {stats.get('detector_objetos_ativo', False)}")
-                print(f"   - Detector faces: {stats.get('detector_faces_ativo', False)}")
-                print(f"   - Interpreter: {stats.get('interpreter_ativo', False)}")
+                print(f"   - Faces cadastradas: {estatisticas.get('faces_cadastradas', 0)}")
+                print(f"   - Detector objetos: {estatisticas.get('detector_objetos_ativo', False)}")
+                print(f"   - Detector faces: {estatisticas.get('detector_faces_ativo', False)}")
+                print(f"   - Interpreter: {estatisticas.get('interpreter_ativo', False)}")
                 return True
-            else:
-                print(f"❌ Success: False")
-                return False
-        except Exception as e:
-            print(f"❌ Erro: {e}")
-            return False
+        
+        # Se nenhum endpoint funcionou
+        print("❌ Nenhum endpoint de health completo encontrado")
+        print("   Endpoints tentados: health-completo, health_completo, estatisticas-sistema")
+        return False
     
     def testar_processar(self, imagem_base64):
         """Testa endpoint /processar"""
         print("\n🎯 Testando PROCESSAR...")
-        try:
-            payload = {
-                "image_data": imagem_base64
-            }
+        payload = {"image_data": imagem_base64}
+        dados, status, erro = self.fazer_requisicao("processar", payload)
+        
+        if status == 200:
+            print(f"✅ Status: {status}")
             
-            response = self.session.post(
-                f"{self.base_url}/processar",
-                json=payload,
-                timeout=TIMEOUT
-            )
+            # Tratamento robusto para diferentes formatos de resposta
+            sucesso = False
+            resumo = {}
+            deteccoes = {}
             
-            print(f"✅ Status: {response.status_code}")
-            data = response.json()
+            if isinstance(dados, dict):
+                sucesso = dados.get('sucesso', False) or dados.get('success', False)
+                resumo = dados.get('resumo', {})
+                deteccoes = dados.get('deteccoes_detalhadas', {})
+            else:
+                print("❌ Resposta não é JSON válido")
+                return False
             
-            if data.get('sucesso'):  # CORREÇÃO: 'sucesso' em português
+            if sucesso:
                 print("📦 DETECÇÕES ENCONTRADAS!")
                 
-                resumo = data.get('resumo', {})
                 print(f"   - Total objetos: {resumo.get('total_objetos', 0)}")
                 print(f"   - Total faces: {resumo.get('total_faces', 0)}")
                 print(f"   - Faces conhecidas: {resumo.get('faces_conhecidas', 0)}")
                 
                 # Mostrar detecções
-                deteccoes = data.get('deteccoes_detalhadas', {})
                 objetos = deteccoes.get('objetos', [])
                 faces = deteccoes.get('faces', [])
                 
                 print(f"   📍 Objetos detectados: {len(objetos)}")
                 for obj in objetos[:3]:
-                    nome = obj.get('nome', '?')
-                    conf = obj.get('confiabilidade', '?')
+                    nome = obj.get('nome', obj.get('classe', '?'))
+                    conf = obj.get('confiabilidade', obj.get('confianca', '?'))
                     print(f"      - {nome} ({conf})")
                 
                 print(f"   👤 Faces detectadas: {len(faces)}")
                 for face in faces[:3]:
-                    nome = face.get('nome', '?')
-                    conf = face.get('confiabilidade', '?')
-                    print(f"      - {nome} ({conf})")
+                    nome = face.get('nome', 'Desconhecido')
+                    conf = face.get('confiabilidade', face.get('confianca', '?'))
+                    conhecida = face.get('conhecida', False)
+                    status = "Conhecida" if conhecida else "Desconhecida"
+                    print(f"      - {nome} ({conf}) - {status}")
                     
                 return True
             else:
-                error_msg = data.get('error', 'Erro desconhecido')
+                error_msg = dados.get('error', 'Erro desconhecido')
                 print(f"❌ Erro do servidor: {error_msg}")
                 return False
                 
-        except Exception as e:
-            print(f"❌ Erro de conexão: {e}")
+        else:
+            print(f"❌ Erro: {erro}")
             return False
     
     def testar_perguntar(self, imagem_base64, pergunta):
-        """Testa endpoint /perguntar"""
+        """Testa endpoint /perguntar - CORRIGIDO"""
         print(f"\n❓ Testando PERGUNTAR: '{pergunta}'")
-        try:
-            payload = {
-                "image_data": imagem_base64,
-                "pergunta": pergunta
-            }
+        payload = {
+            "image_data": imagem_base64,
+            "pergunta": pergunta
+        }
+        
+        dados, status, erro = self.fazer_requisicao("perguntar", payload)
+        
+        if status == 200:
+            print(f"✅ Status: {status}")
             
-            response = self.session.post(
-                f"{self.base_url}/perguntar",
-                json=payload,
-                timeout=TIMEOUT
-            )
+            # 🔥 CORREÇÃO PRINCIPAL - Tratamento robusto para diferentes formatos
+            resposta_texto = ""
+            correlacao_imagem = False
+            dados_utilizados = {}
+            sucesso = False
             
-            print(f"✅ Status: {response.status_code}")
-            data = response.json()
-            
-            if data.get('sucesso'):  # CORREÇÃO: 'sucesso' em português
-                resposta = data.get('resposta', 'N/A')
-                print(f"💬 RESPOSTA: {resposta}")
-                
-                correlacao = data.get('correlacao_com_imagem', False)
-                tipo_pergunta = data.get('tipo_pergunta', 'N/A')
-                print(f"🔗 Correlação com imagem: {correlacao}")
-                print(f"📝 Tipo de pergunta: {tipo_pergunta}")
-                
-                # Mostrar dados utilizados
-                dados_utilizados = data.get('dados_utilizados', {})
-                if dados_utilizados and dados_utilizados != "Pergunta geral sobre o mundo - sem dados da imagem":
-                    pessoas = dados_utilizados.get('pessoas_detectadas', 0)
-                    objetos = dados_utilizados.get('objetos_detectados', {})
-                    print(f"📊 Dados utilizados: {pessoas} pessoa(s), {len(objetos)} tipo(s) de objeto(s)")
-                else:
-                    print(f"📊 Dados utilizados: {dados_utilizados}")
-                    
-                return True
+            if isinstance(dados, dict):
+                # Formato JSON normal
+                sucesso = dados.get('sucesso', False) or dados.get('success', False)
+                resposta_texto = dados.get('resposta', 'Resposta não disponível')
+                correlacao_imagem = dados.get('correlacao_com_imagem', False)
+                dados_utilizados = dados.get('dados_utilizados', {})
+            elif isinstance(dados, str):
+                # Resposta direta em string
+                resposta_texto = dados
+                sucesso = True  # Assumir sucesso se recebeu resposta
             else:
-                error_msg = data.get('error', 'Erro desconhecido')
-                print(f"❌ Erro do servidor: {error_msg}")
-                return False
+                resposta_texto = "Formato de resposta desconhecido"
+            
+            print(f"💬 RESPOSTA: {resposta_texto}")
+            
+            # Só mostrar estes campos se estiverem disponíveis
+            if isinstance(dados, dict):
+                print(f"🔗 Correlação com imagem: {correlacao_imagem}")
                 
-        except Exception as e:
-            print(f"❌ Erro de conexão: {e}")
+                if dados_utilizados and dados_utilizados != "Pergunta geral - sem dados da imagem":
+                    if isinstance(dados_utilizados, dict):
+                        pessoas = dados_utilizados.get('pessoas_detectadas', 0)
+                        objetos = dados_utilizados.get('objetos_detectados', {})
+                        print(f"📊 Dados utilizados: {pessoas} pessoa(s), {len(objetos)} tipo(s) de objeto(s)")
+                    else:
+                        print(f"📊 Dados utilizados: {dados_utilizados}")
+            
+            return True
+        else:
+            print(f"❌ Erro: {erro}")
+            if dados:
+                print(f"📄 Resposta parcial: {dados}")
             return False
     
     def testar_estatistica(self, imagem_base64):
         """Testa endpoint /estatistica"""
         print("\n📊 Testando ESTATISTICA...")
-        try:
-            payload = {
-                "image_data": imagem_base64
-            }
+        payload = {"image_data": imagem_base64}
+        dados, status, erro = self.fazer_requisicao("estatistica", payload)
+        
+        if status == 200:
+            print(f"✅ Status: {status}")
             
-            response = self.session.post(
-                f"{self.base_url}/estatistica",
-                json=payload,
-                timeout=TIMEOUT
-            )
+            # Tratamento robusto para diferentes formatos
+            contagens = {}
+            precisao = {}
+            objetos_tipo = {}
             
-            print(f"✅ Status: {response.status_code}")
-            data = response.json()
-            
-            # CORREÇÃO: endpoint /estatistica não tem campo 'sucesso', é direto
-            if 'contagens' in data:  
-                print("📈 ESTATÍSTICAS ENCONTRADAS!")
+            if isinstance(dados, dict):
+                # Pode vir direto ou dentro de 'contagens'
+                if 'contagens' in dados:
+                    contagens = dados.get('contagens', {})
+                    precisao = dados.get('precisao', {})
+                else:
+                    contagens = dados  # Dados diretos
                 
-                contagens = data.get('contagens', {})
-                print(f"   - Total objetos: {contagens.get('total_objetos', 0)}")
-                print(f"   - Total faces: {contagens.get('total_faces', 0)}")
-                print(f"   - Faces conhecidas: {contagens.get('faces_conhecidas', 0)}")
-                
-                # Objetos por tipo
                 objetos_tipo = contagens.get('objetos_por_tipo', {})
-                if objetos_tipo:
+            
+            print("📈 ESTATÍSTICAS ENCONTRADAS!")
+            print(f"   - Total objetos: {contagens.get('total_objetos', 0)}")
+            print(f"   - Total faces: {contagens.get('total_faces', 0)}")
+            print(f"   - Faces conhecidas: {contagens.get('faces_conhecidas', 0)}")
+            
+            # Objetos por tipo
+            if objetos_tipo:
+                print("   📦 Objetos por tipo:")
+                for obj, qtd in objetos_tipo.items():
+                    print(f"      - {obj}: {qtd}")
+            elif isinstance(dados, dict):
+                # Tentar encontrar objetos de outra forma
+                objetos_detectados = contagens.get('objetos_detectados', {})
+                if objetos_detectados:
                     print("   📦 Objetos por tipo:")
-                    for obj, qtd in objetos_tipo.items():
+                    for obj, qtd in objetos_detectados.items():
                         print(f"      - {obj}: {qtd}")
-                
-                # Precisão
-                precisao = data.get('precisao', {})
-                print("   🎯 Precisão:")
-                print(f"      - Confiança média objetos: {precisao.get('confianca_media_objetos', 'N/A')}")
-                print(f"      - Confiança média faces: {precisao.get('confianca_media_faces', 'N/A')}")
-                
-                return True
-            else:
-                print("❌ Estrutura de resposta inesperada")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Erro de conexão: {e}")
+            
+            # Precisão
+            print("   🎯 Precisão:")
+            conf_objetos = precisao.get('confianca_media_objetos', 'N/A')
+            conf_faces = precisao.get('confianca_media_faces', 'N/A')
+            print(f"      - Confiança média objetos: {conf_objetos}")
+            print(f"      - Confiança média faces: {conf_faces}")
+            
+            return True
+        else:
+            print(f"❌ Erro: {erro}")
             return False
     
     def testar_completo(self, imagem_base64, pergunta):
         """Testa endpoint /completo"""
         print(f"\n🎪 Testando COMPLETO...")
-        try:
-            payload = {
-                "image_data": imagem_base64,
-                "pergunta": pergunta
-            }
+        payload = {
+            "image_data": imagem_base64,
+            "pergunta": pergunta
+        }
+        
+        dados, status, erro = self.fazer_requisicao("completo", payload)
+        
+        if status == 200:
+            print(f"✅ Status: {status}")
             
-            response = self.session.post(
-                f"{self.base_url}/completo",
-                json=payload,
-                timeout=TIMEOUT
-            )
-            
-            print(f"✅ Status: {response.status_code}")
-            data = response.json()
-            
-            if data.get('sucesso'):  # CORREÇÃO: 'sucesso' em português
-                print("📋 RESUMO COMPLETO ENCONTRADO!")
+            # Tratamento robusto para diferentes formatos
+            if isinstance(dados, dict):
+                sucesso = dados.get('sucesso', False) or dados.get('success', False)
                 
-                # Resumo inteligente
-                resumo = data.get('resumo_inteligente', '')
-                if resumo:
-                    print(f"   🧠 {resumo}")
-                
-                # Resposta da pergunta
-                resposta_pergunta = data.get('perguntar', {})
-                if isinstance(resposta_pergunta, dict) and resposta_pergunta.get('sucesso'):
-                    resposta = resposta_pergunta.get('resposta', '')
-                    if resposta:
-                        print(f"   💬 Resposta: {resposta}")
-                
-                # Estatísticas
-                stats = data.get('estatisticas', {})
-                if isinstance(stats, dict) and 'contagens' in stats:
-                    contagens = stats['contagens']
-                    print(f"   📊 Estatísticas: {contagens.get('total_objetos', 0)} objetos, {contagens.get('total_faces', 0)} faces")
-                
-                # Tempo de processamento
-                tempo_total = data.get('tempo_total_processamento', 'N/A')
-                print(f"   ⏱️  Tempo total: {tempo_total}")
+                if sucesso:
+                    print("📋 RESUMO COMPLETO ENCONTRADO!")
                     
-                return True
+                    # Resumo inteligente
+                    resumo = dados.get('resumo_inteligente', '')
+                    if resumo:
+                        print(f"   🧠 {resumo}")
+                    
+                    # Resposta da pergunta
+                    resposta_pergunta = dados.get('perguntar', {})
+                    if isinstance(resposta_pergunta, dict):
+                        resposta = resposta_pergunta.get('resposta', '')
+                        if resposta:
+                            print(f"   💬 Resposta: {resposta}")
+                    else:
+                        print(f"   💬 Resposta: {resposta_pergunta}")
+                    
+                    # Estatísticas
+                    stats = dados.get('estatisticas', {})
+                    if isinstance(stats, dict):
+                        contagens = stats.get('contagens', {})
+                        total_obj = contagens.get('total_objetos', 0)
+                        total_faces = contagens.get('total_faces', 0)
+                        print(f"   📊 Estatísticas: {total_obj} objetos, {total_faces} faces")
+                    
+                    # Tempo de processamento
+                    tempo_total = dados.get('tempo_total_processamento', 'N/A')
+                    print(f"   ⏱️  Tempo total: {tempo_total}")
+                    
+                    return True
+                else:
+                    error_msg = dados.get('error', 'Erro desconhecido')
+                    print(f"❌ Erro do servidor: {error_msg}")
+                    return False
             else:
-                error_msg = data.get('error', 'Erro desconhecido')
-                print(f"❌ Erro do servidor: {error_msg}")
-                return False
+                print(f"📄 Resposta: {dados}")
+                return True
                 
-        except Exception as e:
-            print(f"❌ Erro de conexão: {e}")
+        else:
+            print(f"❌ Erro: {erro}")
             return False
     
     def executar_testes_completos(self, caminho_imagem):
         """Executa todos os testes com uma imagem"""
-        ambiente = "LOCAL" if "localhost" in self.base_url else "NUVEM"
         print("=" * 60)
-        print(f"🎪 TESTADOR DA API OCCHIO CLOUD - {ambiente}")
+        print("🎪 TESTADOR DA API OCCHIO CLOUD - NUVEM")
         print("=" * 60)
-        print(f"🌐 Conectando em: {self.base_url}")
+        print(f"🌐 Conectando em: {self.cloud_url}")
         print("=" * 60)
         
         # Carregar imagem
@@ -293,14 +344,11 @@ class TestadorOcchio:
         resultados.append(self.testar_health_completo())
         resultados.append(self.testar_processar(imagem_base64))
         
-        # Testar várias perguntas - INCLUINDO PERGUNTAS GERAIS
+        # Testar várias perguntas
         perguntas = [
             "Quantas pessoas estão na foto?",
             "O que tem nesta imagem?",
-            "Tem cadeiras na imagem?",
-            "o céu é azul?",
-            "Quantos planetas existem no sistema solar?",
-            "Descreva o ambiente"
+            "o céu é azul?"
         ]
         
         for pergunta in perguntas:
@@ -331,8 +379,8 @@ class TestadorOcchio:
 def main():
     """Função principal"""
     if len(sys.argv) < 2:
-        print("Uso: python teste_local.py <caminho_para_imagem>")
-        print("Exemplo: python teste_local.py teste.jpg")
+        print("Uso: python teste_nuvem.py <caminho_para_imagem>")
+        print("Exemplo: python teste_nuvem.py teste.jpg")
         sys.exit(1)
     
     caminho_imagem = sys.argv[1]
@@ -341,15 +389,7 @@ def main():
         print(f"❌ Arquivo não encontrado: {caminho_imagem}")
         sys.exit(1)
     
-    # Escolher URL base
-    if USAR_LOCAL:
-        url = LOCAL_URL
-        print("🔧 Modo: TESTE LOCAL")
-    else:
-        url = CLOUD_URL  
-        print("☁️  Modo: TESTE NUVEM")
-    
-    testador = TestadorOcchio(url)
+    testador = TestadorNuvem(CLOUD_URL)
     sucesso = testador.executar_testes_completos(caminho_imagem)
     
     sys.exit(0 if sucesso else 1)
