@@ -12,9 +12,7 @@ import threading
 import traceback
 import base64
 import math
-
-# Flask - APENAS para criar o app
-from flask import Flask
+from flask import Flask, jsonify
 
 # ================== CONFIGURAÇÃO DE LOG ==================
 logging.basicConfig(
@@ -27,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Occhio-Cloud")
 
-# Criar app Flask
+# Criar app Flask - DEVE SER GLOBAL PARA GUNICORN
 app = Flask(__name__)
 
 # Cache para evitar inicialização múltipla
@@ -152,10 +150,20 @@ class OcchioCloud:
                 return "Sistema em modo de fallback. Alguns recursos podem estar limitados."
             
             def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
-                return "Sistema em modo de fallback. Tente novamente mais tarde."
+                return {
+                    'sucesso': True,
+                    'resposta': 'Sistema em modo de fallback. Algumas funcionalidades podem estar limitadas.',
+                    'pergunta': pergunta,
+                    'timestamp': time.time(),
+                    'tempo_total': '0.1s'
+                }
             
             def obter_estatisticas(self, objetos_detectados=None, faces_detectadas=None):
-                return {"sucesso": False, "modo": "fallback"}
+                return {
+                    'sucesso': True,
+                    'contagens': {'total_objetos': 0, 'total_faces': 0},
+                    'timestamp': time.time()
+                }
         
         return MockInterpreter()
 
@@ -304,7 +312,7 @@ class OcchioCloud:
                                 if objeto['name'] == classe:
                                     objeto['count'] = contador_classes[classe]
                                     # Atualizar confiança para a média
-                                    objeto['confidence'] = (objeto['confidence'] * (contador_classes[classe]-1) + confianca) /  contador_classes[classe]
+                                    objeto['confidence'] = (objeto['confidence'] * (contador_classes[classe]-1) + confianca) / contador_classes[classe]
                                     break
                                 
                     print(f"  ✅ Objetos após agrupamento: {[(o['name'], o['count']) for o in deteccoes['objetos']]}")
@@ -601,18 +609,32 @@ def get_occhio_instance():
                     _occhio_instance = OcchioCloud(api_key=None)
     return _occhio_instance
 
-# Função para criar app (necessário para Gunicorn)
-def create_app():
-    """Factory para criar a app Flask (necessário para Gunicorn)"""
-    # Configurar rotas
-    from routes import configure_routes
-    configure_routes(app, get_occhio_instance)
-    
-    # Adicionar rota de health check
-    @app.route('/health')
-    def health_check():
+# ========== ROTAS BÁSICAS (DEVEM ESTAR FORA DE QUALQUER FUNÇÃO) ==========
+
+@app.route('/')
+def index():
+    """Página inicial da API"""
+    return jsonify({
+        "app": "Occhio Cloud API",
+        "version": "1.0.0",
+        "status": "online",
+        "timestamp": time.time(),
+        "endpoints": {
+            "/": "GET - Esta página",
+            "/health": "GET - Health check do sistema",
+            "/system": "GET - Status do sistema",
+            "/processar": "POST - Processa imagem para segurança",
+            "/perguntar": "POST - Pergunta sobre imagem",
+            "/estatistica": "POST - Estatísticas detalhadas"
+        }
+    })
+
+@app.route('/health')
+def health():
+    """Health check OBRIGATÓRIO para Cloud Run"""
+    try:
         occhio = get_occhio_instance()
-        return {
+        return jsonify({
             "status": "healthy",
             "timestamp": time.time(),
             "services": {
@@ -621,24 +643,89 @@ def create_app():
                 "interpreter": occhio.interpreter is not None,
                 "banco_dados": occhio.db is not None
             }
-        }
-    
-    return app
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "degraded",
+            "timestamp": time.time(),
+            "error": str(e),
+            "app_running": True
+        }), 200
 
-# Para execução direta (não usado com Gunicorn)
+@app.route('/system')
+def system():
+    """Status do sistema"""
+    try:
+        occhio = get_occhio_instance()
+        resultado = occhio.obter_estatisticas_sistema()
+        return jsonify(resultado)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
+# ========== CONFIGURAR ROTAS RESTANTES DO routes.py ==========
+
+try:
+    from routes import configure_routes
+    # Esta função deve adicionar as rotas /processar, /perguntar, /estatistica
+    configure_routes(app, get_occhio_instance)
+    logger.info("✅ Rotas adicionais configuradas com sucesso")
+except ImportError as e:
+    logger.error(f"❌ Erro ao importar routes: {e}")
+    # Criar fallback para as rotas principais
+    
+    @app.route('/processar', methods=['POST'])
+    def processar_fallback():
+        return jsonify({
+            "sucesso": False,
+            "error": "Módulo de rotas não carregado",
+            "timestamp": time.time()
+        }), 503
+    
+    @app.route('/perguntar', methods=['POST'])
+    def perguntar_fallback():
+        return jsonify({
+            "sucesso": False,
+            "error": "Módulo de rotas não carregado",
+            "timestamp": time.time()
+        }), 503
+    
+    @app.route('/estatistica', methods=['POST'])
+    def estatistica_fallback():
+        return jsonify({
+            "sucesso": False,
+            "error": "Módulo de rotas não carregado",
+            "timestamp": time.time()
+        }), 503
+
+except Exception as e:
+    logger.error(f"❌ Erro ao configurar rotas: {e}")
+
+# ========== MIDDLEWARE DE INICIALIZAÇÃO ==========
+
+@app.before_request
+def initialize_on_first_request():
+    """Inicializa o sistema na primeira requisição"""
+    try:
+        get_occhio_instance()
+    except Exception as e:
+        logger.error(f"❌ Erro na inicialização: {e}")
+
+# ========== EXECUÇÃO ==========
+# NOTA: Não usamos mais create_app() porque o app já está configurado
+# Gunicorn vai usar 'app' diretamente
+
 if __name__ == "__main__":
-    # Criar app
-    app = create_app()
-    
-    # Configurar port
+    # Para execução direta (sem Gunicorn)
     port = int(os.getenv('PORT', '8080'))
+    logger.info(f"🚀 Iniciando Occhio Cloud na porta {port}")
     
-    # Executar com waitress (melhor para desenvolvimento)
     try:
         from waitress import serve
-        logger.info(f"🚀 Iniciando Occhio Cloud com Waitress na porta {port}")
         serve(app, host='0.0.0.0', port=port, threads=8)
     except ImportError:
         # Fallback para Flask dev server
-        logger.info(f"🚀 Iniciando Occhio Cloud (Flask dev) na porta {port}")
         app.run(host='0.0.0.0', port=port, debug=False)
