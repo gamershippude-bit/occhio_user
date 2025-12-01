@@ -27,8 +27,32 @@ jobs:
       with:
         project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-    - name: Build and Deploy
+    - name: Configure Docker
       run: |
-        gcloud builds submit \
-          --config=cloudbuild.yaml \
-          --substitutions=_OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},_DB_HOST=${{ secrets.DB_HOST }},_DB_USER=${{ secrets.DB_USER }},_DB_PASSWORD=${{ secrets.DB_PASSWORD }},_DB_NAME=${{ secrets.DB_NAME }}
+        gcloud auth configure-docker --quiet
+
+    - name: Build and Push
+      run: |
+        docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE }}:${{ github.sha }} .
+        docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE }}:${{ github.sha }}
+
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy ${{ env.SERVICE }} \
+          --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ env.SERVICE }}:${{ github.sha }} \
+          --region ${{ env.REGION }} \
+          --platform managed \
+          --memory 2Gi \
+          --cpu 2 \
+          --timeout 600 \
+          --max-instances 10 \
+          --min-instances 0 \
+          --concurrency 80 \
+          --allow-unauthenticated \
+          --update-env-vars "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},DB_HOST=${{ secrets.DB_HOST }},DB_USER=${{ secrets.DB_USER }},DB_PASSWORD=${{ secrets.DB_PASSWORD }},DB_NAME=${{ secrets.DB_NAME }},PYTHONUNBUFFERED=1"
+
+    - name: Show Service URL
+      run: |
+        gcloud run services describe ${{ env.SERVICE }} \
+          --region ${{ env.REGION }} \
+          --format 'value(status.url)'

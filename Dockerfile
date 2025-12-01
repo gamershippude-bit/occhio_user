@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
