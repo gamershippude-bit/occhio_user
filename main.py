@@ -1,6 +1,6 @@
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
-VERSÃO CLOUD/API - Endpoints completos baseados no novo interpreter
+VERSÃO CLOUD/API - Endpoints corrigidos com parâmetros corretos
 """
 
 import cv2
@@ -248,7 +248,7 @@ class OcchioCloud:
             
             if not self.interpreter:
                 return {
-                    "success": False,
+                    "sucesso": False,
                     "error": "Interpreter não disponível",
                     "timestamp": time.time()
                 }
@@ -264,7 +264,7 @@ class OcchioCloud:
         except Exception as e:
             logger.error(f"❌ Erro endpoint_processar: {e}")
             return {
-                "success": False,
+                "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
@@ -279,7 +279,7 @@ class OcchioCloud:
             
             if not self.interpreter:
                 return {
-                    "success": False,
+                    "sucesso": False,
                     "error": "Interpreter não disponível",
                     "timestamp": time.time()
                 }
@@ -299,7 +299,7 @@ class OcchioCloud:
         except Exception as e:
             logger.error(f"❌ Erro endpoint_perguntar: {e}")
             return {
-                "success": False,
+                "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
@@ -314,7 +314,7 @@ class OcchioCloud:
             
             if not self.interpreter:
                 return {
-                    "success": False,
+                    "sucesso": False,
                     "error": "Interpreter não disponível",
                     "timestamp": time.time()
                 }
@@ -330,7 +330,7 @@ class OcchioCloud:
         except Exception as e:
             logger.error(f"❌ Erro endpoint_estatistica: {e}")
             return {
-                "success": False,
+                "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
@@ -345,7 +345,7 @@ class OcchioCloud:
             
             if not self.interpreter:
                 return {
-                    "success": False,
+                    "sucesso": False,
                     "error": "Interpreter não disponível",
                     "timestamp": time.time()
                 }
@@ -365,7 +365,7 @@ class OcchioCloud:
         except Exception as e:
             logger.error(f"❌ Erro endpoint_completo: {e}")
             return {
-                "success": False,
+                "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
@@ -453,48 +453,51 @@ def ready_check():
     else:
         return jsonify({"status": "initializing", "initialized": False}), 503
 
-# ================== NOVOS ENDPOINTS BASEADOS NO INTERPRETER ==================
+# ================== ENDPOINTS CORRIGIDOS ==================
 
 @app.route('/processar', methods=['POST'])
 def processar():
     """
     Endpoint /processar - Processa imagem e retorna detecções com coordenadas
+    REQUER: apenas imagem
     """
     try:
         occhio = get_occhio_instance()
         
         if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"success": False, "error": "Nenhuma imagem fornecida"}), 400
+            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
         
         if 'image' in request.files:
             image_data = request.files['image'].read()
         else:
             image_data = request.json['image_data']
         
+        logger.info("🔄 Processando imagem para endpoint /processar")
         resultado = occhio.endpoint_processar(image_data)
         return jsonify(resultado)
         
     except Exception as e:
         logger.error(f"❌ Erro endpoint /processar: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"sucesso": False, "error": str(e)}), 500
 
 @app.route('/perguntar', methods=['POST'])
 def perguntar():
     """
     Endpoint /perguntar - Responde pergunta com correlação com imagem
+    REQUER: imagem + pergunta
     """
     try:
         occhio = get_occhio_instance()
         
         data = request.json
         if 'pergunta' not in data:
-            return jsonify({"success": False, "error": "Pergunta não fornecida"}), 400
+            return jsonify({"sucesso": False, "error": "Pergunta não fornecida"}), 400
         
         pergunta = data['pergunta']
         image_data = data.get('image_data')
         
         if not image_data:
-            return jsonify({"success": False, "error": "Forneça image_data"}), 400
+            return jsonify({"sucesso": False, "error": "Forneça image_data"}), 400
         
         logger.info(f"❓ Nova pergunta: '{pergunta}'")
         resultado = occhio.endpoint_perguntar(image_data, pergunta)
@@ -502,58 +505,62 @@ def perguntar():
         
     except Exception as e:
         logger.error(f"❌ Erro endpoint /perguntar: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"sucesso": False, "error": str(e)}), 500
 
 @app.route('/estatistica', methods=['POST'])
 def estatistica():
     """
     Endpoint /estatistica - Retorna estatísticas detalhadas da imagem
+    REQUER: apenas imagem
     """
     try:
         occhio = get_occhio_instance()
         
         if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"success": False, "error": "Nenhuma imagem fornecida"}), 400
+            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
         
         if 'image' in request.files:
             image_data = request.files['image'].read()
         else:
             image_data = request.json['image_data']
         
+        logger.info("📊 Gerando estatísticas para endpoint /estatistica")
         resultado = occhio.endpoint_estatistica(image_data)
         return jsonify(resultado)
         
     except Exception as e:
         logger.error(f"❌ Erro endpoint /estatistica: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"sucesso": False, "error": str(e)}), 500
 
 @app.route('/completo', methods=['POST'])
 def completo():
     """
     Endpoint /completo - Junta todos os processamentos
+    REQUER: imagem (obrigatória) + pergunta (opcional)
     """
     try:
         occhio = get_occhio_instance()
         
         if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"success": False, "error": "Nenhuma imagem fornecida"}), 400
+            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
         
-        # Obter dados
+        # Obter dados - IMAGEM É OBRIGATÓRIA, PERGUNTA É OPCIONAL
         if 'image' in request.files:
             image_data = request.files['image'].read()
         else:
             image_data = request.json['image_data']
         
-        pergunta = request.json.get('pergunta')
+        # PERGUNTA É OPCIONAL - se não tiver, usar None
+        pergunta = request.json.get('pergunta')  # get() em vez de ['pergunta']
         
-        logger.info(f"🎯 Endpoint COMPLETO - Pergunta: {pergunta}")
+        logger.info(f"🎯 Endpoint COMPLETO - Pergunta: {pergunta if pergunta else 'Nenhuma (apenas análise)'}")
         
         resultado = occhio.endpoint_completo(image_data, pergunta)
         return jsonify(resultado)
         
     except Exception as e:
         logger.error(f"❌ Erro endpoint /completo: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"sucesso": False, "error": str(e)}), 500
 
 @app.route('/estatisticas-sistema', methods=['GET'])
 def estatisticas_sistema():
@@ -577,16 +584,18 @@ def analise_rapida():
     try:
         # Redirecionar para /perguntar com pergunta padrão
         data = request.json if request.json else {}
+        if 'image_data' not in data:
+            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
+        
         data['pergunta'] = "Descreva o que você vê nesta imagem"
         
         # Criar uma requisição fake para o endpoint perguntar
-        from flask import copy_current_request_context
-        with copy_current_request_context():
-            return perguntar()
+        request._cached_json = data
+        return perguntar()
             
     except Exception as e:
         logger.error(f"❌ Erro endpoint /analise-rapida: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"sucesso": False, "error": str(e)}), 500
 
 def iniciar_servidor():
     """Inicia o servidor para nuvem"""
