@@ -16,6 +16,7 @@ htmlcov/
 .nox/
 *.log
 logs/
+models/
 debug_frames/
 rostos/
 test/
@@ -26,6 +27,8 @@ tmp/
 .vscode
 .idea
 *.iml
+*.weights
+*.pt
 *.db
 *.sqlite3
 cloudbuild.yaml

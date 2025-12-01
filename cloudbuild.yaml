@@ -25,6 +25,7 @@ steps:
     - 'managed'
     - '--memory'
     - '2Gi'
+    - '--max-instances'
     - '--cpu'
     - '2'
     - '--timeout'
