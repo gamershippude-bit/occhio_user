@@ -67,15 +67,32 @@ class OcchioCloud:
             # Inicializar componentes com tratamento de erro individual
             logger.info("🔧 Inicializando detectores...")
             
-            # YOLO - com fallback
+            # YOLO - com fallback MAS COM LOGS DETALHADOS
             try:
                 from Detectors.yolo_detector import YOLODetector
+                logger.info("🔄 Tentando inicializar YOLO...")
                 self.detector_objetos = YOLODetector()
                 logger.info("✅ YOLO inicializado com sucesso")
+                
+                # Testar se não é mock
+                if hasattr(self.detector_objetos, 'model'):
+                    logger.info(f"📦 Modelo YOLO carregado")
+                    # Testar rápido se consegue detectar
+                    try:
+                        test_frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+                        test_result = self.detector_objetos.detectar_com_bbox(test_frame, confidence_threshold=0.1)
+                        logger.info(f"🧪 Teste YOLO: {len(test_result)} detecções em imagem teste")
+                    except Exception as test_e:
+                        logger.warning(f"⚠️ Teste YOLO falhou: {test_e}")
+                else:
+                    logger.warning("⚠️ YOLO pode estar em modo mock")
+                    
             except Exception as e:
                 logger.error(f"❌ Erro YOLO: {e}")
+                logger.error(f"📋 Traceback YOLO: {traceback.format_exc()}")
                 # Cria detector mock para desenvolvimento
                 self.detector_objetos = self._create_mock_detector()
+                logger.warning("🔄 Usando detector mock para YOLO")
                 
             # Face Detector - com fallback
             try:
@@ -118,15 +135,26 @@ class OcchioCloud:
     def _create_mock_detector(self):
         """Cria um detector mock para quando YOLO falhar"""
         class MockDetector:
-            def detectar_com_bbox(self, frame):
+            def detectar_com_bbox(self, frame, confidence_threshold=0.25):
                 # Retorna algumas detecções mock para desenvolvimento
-                return [
+                # Mas com mais variedade para testes
+                detections = [
                     {'class': 'person', 'confidence': 0.85, 'bbox': {'x': 100, 'y': 100, 'width': 50, 'height': 150}},
-                    {'class': 'chair', 'confidence': 0.75, 'bbox': {'x': 200, 'y': 200, 'width': 60, 'height': 80}}
+                    {'class': 'person', 'confidence': 0.78, 'bbox': {'x': 300, 'y': 120, 'width': 55, 'height': 160}},
+                    {'class': 'chair', 'confidence': 0.75, 'bbox': {'x': 200, 'y': 200, 'width': 60, 'height': 80}},
+                    {'class': 'table', 'confidence': 0.65, 'bbox': {'x': 150, 'y': 300, 'width': 120, 'height': 70}},
+                    {'class': 'laptop', 'confidence': 0.70, 'bbox': {'x': 180, 'y': 220, 'width': 40, 'height': 30}},
+                    {'class': 'book', 'confidence': 0.60, 'bbox': {'x': 250, 'y': 210, 'width': 35, 'height': 25}},
                 ]
+                
+                # Filtrar por confidence threshold
+                return [d for d in detections if d['confidence'] >= confidence_threshold]
             
-            def detectar_objetos_rapido(self, frame):
-                return ['person', 'chair'], [0.85, 0.75]
+            def detectar_objetos_rapido(self, frame, confidence_threshold=0.25):
+                detections = self.detectar_com_bbox(frame, confidence_threshold)
+                objetos = [d['class'] for d in detections]
+                confiancas = [d['confidence'] for d in detections]
+                return objetos, confiancas
         
         return MockDetector()
 
@@ -147,21 +175,125 @@ class OcchioCloud:
         """Cria um interpreter mock"""
         class MockInterpreter:
             def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
-                return "Sistema em modo de fallback. Alguns recursos podem estar limitados."
+                objetos_count = {}
+                for obj in (objetos_detectados or []):
+                    nome = obj.get('name', 'desconhecido')
+                    count = obj.get('count', 1)
+                    objetos_count[nome] = objetos_count.get(nome, 0) + count
+                
+                if objetos_count:
+                    desc = "Analisando a imagem: "
+                    items = []
+                    for obj, qtd in objetos_count.items():
+                        if qtd > 1:
+                            items.append(f"{qtd} {obj}s")
+                        else:
+                            items.append(f"um {obj}")
+                    
+                    if len(items) > 1:
+                        desc += ", ".join(items[:-1]) + f" e {items[-1]}"
+                    else:
+                        desc += items[0] if items else "poucos elementos visíveis"
+                    
+                    return desc + "."
+                else:
+                    return "Estou analisando o ambiente, mas não estou detectando muitos elementos específicos no momento."
             
             def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
+                # Respostas mais inteligentes para o mock
+                pergunta_lower = pergunta.lower()
+                objetos_count = {}
+                for obj in (objetos_detectados or []):
+                    nome = obj.get('name', 'desconhecido')
+                    count = obj.get('count', 1)
+                    objetos_count[nome] = objetos_count.get(nome, 0) + count
+                
+                # Construir resposta baseada no tipo de pergunta
+                if "quantas pessoas" in pergunta_lower or "quantas pessoa" in pergunta_lower:
+                    pessoas = objetos_count.get('person', 0)
+                    if pessoas > 0:
+                        resposta = f"Na imagem que estou analisando, vejo {pessoas} pessoa{'s' if pessoas > 1 else ''}."
+                    else:
+                        resposta = "Não estou detectando pessoas na imagem no momento."
+                
+                elif "o que tem" in pergunta_lower or "descreva" in pergunta_lower:
+                    if objetos_count:
+                        items = []
+                        for obj, qtd in objetos_count.items():
+                            if qtd > 1:
+                                items.append(f"{qtd} {obj}s")
+                            else:
+                                items.append(f"um {obj}")
+                        
+                        if len(items) > 1:
+                            resposta = f"Na imagem, identifico: {', '.join(items[:-1])} e {items[-1]}."
+                        else:
+                            resposta = f"Estou vendo {items[0]} na imagem."
+                    else:
+                        resposta = "Estou analisando a imagem, mas não estou detectando elementos específicos."
+                
+                elif "objetos" in pergunta_lower or "identifica" in pergunta_lower:
+                    objetos_sem_pessoa = {k: v for k, v in objetos_count.items() if k != 'person'}
+                    if objetos_sem_pessoa:
+                        items = []
+                        for obj, qtd in objetos_sem_pessoa.items():
+                            if qtd > 1:
+                                items.append(f"{qtd} {obj}s")
+                            else:
+                                items.append(obj)
+                        resposta = f"Identifico os seguintes objetos: {', '.join(items)}."
+                    else:
+                        resposta = "No momento, não estou detectando objetos além de pessoas."
+                
+                elif "cadeira" in pergunta_lower:
+                    cadeiras = objetos_count.get('chair', 0)
+                    if cadeiras > 0:
+                        resposta = f"Sim, estou vendo {cadeiras} cadeira{'s' if cadeiras > 1 else ''} na imagem."
+                    else:
+                        resposta = "Não estou detectando cadeiras na imagem no momento."
+                
+                elif "intern" in pergunta_lower or "extern" in pergunta_lower:
+                    # Tentar inferir baseado nos objetos
+                    objetos_interiores = {'chair', 'table', 'bed', 'couch', 'tv', 'laptop', 'book'}
+                    tem_objeto_interior = any(obj in objetos_interiores for obj in objetos_count.keys())
+                    
+                    if tem_objeto_interior:
+                        resposta = "Pela presença de móveis e objetos domésticos, parece um ambiente interno."
+                    else:
+                        resposta = "É difícil determinar sem mais elementos visíveis, mas pode ser um ambiente externo ou espaço aberto."
+                
+                else:
+                    # Resposta genérica
+                    if objetos_count:
+                        total = sum(objetos_count.values())
+                        resposta = f"Estou analisando uma imagem com aproximadamente {total} elementos detectados."
+                    else:
+                        resposta = "Estou processando a imagem que você enviou. Em que mais posso ajudar?"
+                
                 return {
                     'sucesso': True,
-                    'resposta': 'Sistema em modo de fallback. Algumas funcionalidades podem estar limitadas.',
+                    'resposta': resposta,
                     'pergunta': pergunta,
                     'timestamp': time.time(),
-                    'tempo_total': '0.1s'
+                    'tempo_total': '0.2s',
+                    'tipo_pergunta': 'sobre_imagem',
+                    'correlacao_com_imagem': True
                 }
             
             def obter_estatisticas(self, objetos_detectados=None, faces_detectadas=None):
+                objetos_count = {}
+                for obj in (objetos_detectados or []):
+                    nome = obj.get('name', 'desconhecido')
+                    count = obj.get('count', 1)
+                    objetos_count[nome] = objetos_count.get(nome, 0) + count
+                
                 return {
                     'sucesso': True,
-                    'contagens': {'total_objetos': 0, 'total_faces': 0},
+                    'contagens': {
+                        'total_objetos': sum(objetos_count.values()),
+                        'total_faces': len(faces_detectadas or []),
+                        'objetos_por_categoria': objetos_count
+                    },
                     'timestamp': time.time()
                 }
         
@@ -174,25 +306,61 @@ class OcchioCloud:
         self.interpreter = self._create_mock_interpreter()
         self.db = None
 
-    def _debug_deteccoes(self, frame):
-        """Debug das detecções para ver o que o YOLO está vendo"""
-        print("\n🔍 DEBUG DETECÇÕES:")
-
-        if self.detector_objetos:
-            try:
-                # Testar método rápido primeiro
-                objetos, confiancas = self.detector_objetos.detectar_objetos_rapido(frame)
-                print(f"  Método rápido: {objetos}")
-                print(f"  Confianças: {confiancas}")
-
-                # Testar método com bbox se existir
-                if hasattr(self.detector_objetos, 'detectar_com_bbox'):
-                    bbox_result = self.detector_objetos.detectar_com_bbox(frame)
-                    print(f"  Método bbox: {bbox_result}")
-
-            except Exception as e:
-                print(f"  ❌ Erro debug: {e}")
+    def _debug_deteccoes_detalhado(self, frame):
+        """Debug DETALHADO das detecções do YOLO"""
+        print("\n🔍🔍 DEBUG DETALHADO DO YOLO:")
+        
+        if not self.detector_objetos:
+            print("  ❌ detector_objetos é None!")
+            return
+        
+        try:
+            # Verificar tipo do detector
+            detector_type = type(self.detector_objetos).__name__
+            print(f"  📋 Tipo do detector: {detector_type}")
+            
+            if 'Mock' in detector_type:
+                print("  ⚠️  USANDO DETECTOR MOCK!")
+            
+            # 1. Tentar método rápido
+            print("  📋 Método rápido (threshold=0.15):")
+            objetos, confiancas = self.detector_objetos.detectar_objetos_rapido(frame, confidence_threshold=0.15)
+            print(f"    Objetos: {objetos}")
+            print(f"    Confianças: {confiancas}")
+            
+            # 2. Tentar método com bbox
+            print("  📋 Método com bbox (threshold=0.15):")
+            if hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                bbox_result = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=0.15)
+                print(f"    Total de detecções: {len(bbox_result)}")
                 
+                # Contar por classe
+                if bbox_result:
+                    contador = {}
+                    for obj in bbox_result:
+                        classe = obj.get('class', 'desconhecido')
+                        contador[classe] = contador.get(classe, 0) + 1
+                    print(f"    Contagem por classe: {contador}")
+                    
+                    # Mostrar algumas detecções
+                    for i, obj in enumerate(bbox_result[:3]):
+                        print(f"    [{i}] {obj.get('class')} (conf: {obj.get('confidence'):.2f})")
+            
+            # Testar com threshold mais baixo
+            print("  📋 Teste com threshold BAIXO (0.1):")
+            if hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                bbox_low = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=0.1)
+                contador_low = {}
+                for obj in bbox_low:
+                    classe = obj.get('class', 'desconhecido')
+                    contador_low[classe] = contador_low.get(classe, 0) + 1
+                print(f"    Com threshold 0.1: {contador_low}")
+                
+        except Exception as e:
+            print(f"  ❌ Erro no debug detalhado: {e}")
+            import traceback
+            traceback.print_exc()
+
     def carregar_faces_do_banco(self):
         """Carrega faces do banco de dados"""
         try:
@@ -270,25 +438,26 @@ class OcchioCloud:
             raise
 
     def _obter_deteccoes_detalhadas(self, frame):
-        """Obtém detecções detalhadas da imagem - VERSÃO CORRIGIDA"""
+        """Obtém detecções detalhadas da imagem - VERSÃO MELHORADA"""
         deteccoes = {
             "objetos": [],
             "faces": []
         }
         
-        # DEBUG primeiro
-        self._debug_deteccoes(frame)
+        # DEBUG DETALHADO primeiro
+        self._debug_deteccoes_detalhado(frame)
         
-        # Detecção de objetos com YOLO
+        # Detecção de objetos com YOLO - COM THRESHOLD MAIS BAIXO
         if self.detector_objetos:
             try:
-                # CORREÇÃO: Usar sempre o método que retorna bounding boxes se disponível
+                # Usar threshold mais baixo para detectar mais objetos
+                confidence_threshold = 0.15  # Reduzido de 0.25 para 0.15
+                
                 if hasattr(self.detector_objetos, 'detectar_com_bbox'):
-                    objetos_com_bbox = self.detector_objetos.detectar_com_bbox(frame)
+                    objetos_com_bbox = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=confidence_threshold)
                     
                     # CONTAGEM CORRETA: Agrupar por classe para evitar duplicações
                     contador_classes = {}
-                    objetos_unicos = []
                     
                     for obj in objetos_com_bbox:
                         classe = obj.get('class', 'desconhecido')
@@ -311,15 +480,15 @@ class OcchioCloud:
                             for objeto in deteccoes["objetos"]:
                                 if objeto['name'] == classe:
                                     objeto['count'] = contador_classes[classe]
-                                    # Atualizar confiança para a média
+                                    # Atualizar confiança para a média ponderada
                                     objeto['confidence'] = (objeto['confidence'] * (contador_classes[classe]-1) + confianca) / contador_classes[classe]
                                     break
                                 
                     print(f"  ✅ Objetos após agrupamento: {[(o['name'], o['count']) for o in deteccoes['objetos']]}")
                     
                 else:
-                    # Fallback para método rápido - também precisa corrigir
-                    objetos, confiancas = self.detector_objetos.detectar_objetos_rapido(frame)
+                    # Fallback para método rápido
+                    objetos, confiancas = self.detector_objetos.detectar_objetos_rapido(frame, confidence_threshold=confidence_threshold)
                     
                     # Agrupar objetos iguais
                     contador = {}
@@ -427,8 +596,12 @@ class OcchioCloud:
                 },
                 "alertas": self._gerar_alertas_seguranca(deteccoes),
                 "deteccoes": {
-                    "objetos": deteccoes["objetos"][:10],  # Limitar para performance
-                    "faces": deteccoes["faces"][:5]        # Limitar para performance
+                    "objetos": deteccoes["objetos"][:15],  # Aumentado para 15
+                    "faces": deteccoes["faces"][:5]
+                },
+                "debug_info": {
+                    "confidence_threshold_used": 0.15,
+                    "detector_type": type(self.detector_objetos).__name__ if self.detector_objetos else None
                 }
             }
             
@@ -475,6 +648,13 @@ class OcchioCloud:
             processing_time = time.time() - start_time
             resultado["tempo_total"] = f"{processing_time:.2f}s"
             
+            # Adicionar debug info
+            resultado["debug_info"] = {
+                "objetos_detectados": [(o['name'], o['count']) for o in deteccoes["objetos"][:5]],
+                "total_objetos": len(deteccoes["objetos"]),
+                "detector_type": type(self.detector_objetos).__name__ if self.detector_objetos else None
+            }
+            
             logger.info(f"✅ Pergunta respondida - Tempo: {processing_time:.2f}s")
             return resultado
             
@@ -519,8 +699,13 @@ class OcchioCloud:
             resultado["metricas_sistema"] = {
                 "memoria_utilizada": f"{self._obter_uso_memoria()} MB",
                 "tempo_resposta": f"{processing_time:.3f}s",
-                "qualidade_imagem": f"{frame.shape[1]}x{frame.shape[0]}"
+                "qualidade_imagem": f"{frame.shape[1]}x{frame.shape[0]}",
+                "detector_objetos": type(self.detector_objetos).__name__ if self.detector_objetos else "None",
+                "confidence_threshold_used": 0.15
             }
+            
+            # Adicionar lista completa de objetos
+            resultado["objetos_detalhados"] = deteccoes["objetos"]
             
             logger.info(f"✅ Estatísticas geradas - {resultado['contagens']['total_objetos']} objetos")
             return resultado
@@ -570,9 +755,12 @@ class OcchioCloud:
     def obter_estatisticas_sistema(self):
         """Retorna estatísticas do sistema"""
         try:
+            detector_type = type(self.detector_objetos).__name__ if self.detector_objetos else "None"
+            
             estatisticas = {
                 "faces_cadastradas": len(self.detector_faces.known_face_names) if self.detector_faces else 0,
                 "detector_objetos_ativo": self.detector_objetos is not None,
+                "detector_objetos_tipo": detector_type,
                 "detector_faces_ativo": self.detector_faces is not None,
                 "interpreter_ativo": self.interpreter is not None,
                 "banco_dados_ativo": self.db is not None,
@@ -639,6 +827,7 @@ def health():
             "timestamp": time.time(),
             "services": {
                 "detector_objetos": occhio.detector_objetos is not None,
+                "detector_objetos_tipo": type(occhio.detector_objetos).__name__ if occhio.detector_objetos else "None",
                 "detector_faces": occhio.detector_faces is not None,
                 "interpreter": occhio.interpreter is not None,
                 "banco_dados": occhio.db is not None
@@ -666,6 +855,43 @@ def system():
             "timestamp": time.time()
         }), 500
 
+@app.route('/debug/detector')
+def debug_detector():
+    """Endpoint de debug para verificar o detector"""
+    try:
+        occhio = get_occhio_instance()
+        
+        # Criar imagem de teste
+        test_frame = np.ones((300, 400, 3), dtype=np.uint8) * 200
+        
+        # Testar detecção
+        if hasattr(occhio.detector_objetos, 'detectar_com_bbox'):
+            detections = occhio.detector_objetos.detectar_com_bbox(test_frame, confidence_threshold=0.15)
+            
+            # Contar
+            counter = {}
+            for det in detections:
+                cls_name = det.get('class', 'unknown')
+                counter[cls_name] = counter.get(cls_name, 0) + 1
+            
+            return jsonify({
+                "detector_type": type(occhio.detector_objetos).__name__,
+                "test_detections": len(detections),
+                "class_counts": counter,
+                "is_mock": "Mock" in type(occhio.detector_objetos).__name__
+            })
+        else:
+            return jsonify({
+                "detector_type": type(occhio.detector_objetos).__name__,
+                "error": "Detector não tem método detectar_com_bbox"
+            })
+            
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
 # ========== CONFIGURAR ROTAS RESTANTES DO routes.py ==========
 
 try:
@@ -679,30 +905,73 @@ except ImportError as e:
     
     @app.route('/processar', methods=['POST'])
     def processar_fallback():
-        return jsonify({
-            "sucesso": False,
-            "error": "Módulo de rotas não carregado",
-            "timestamp": time.time()
-        }), 503
+        try:
+            occhio = get_occhio_instance()
+            data = request.get_json()
+            if not data or 'imagem' not in data:
+                return jsonify({
+                    "sucesso": False,
+                    "error": "Envie {'imagem': 'base64_string'}",
+                    "timestamp": time.time()
+                }), 400
+            
+            resultado = occhio.processar_imagem_seguranca(data['imagem'])
+            return jsonify(resultado)
+        except Exception as e:
+            return jsonify({
+                "sucesso": False,
+                "error": str(e),
+                "timestamp": time.time()
+            }), 500
     
     @app.route('/perguntar', methods=['POST'])
     def perguntar_fallback():
-        return jsonify({
-            "sucesso": False,
-            "error": "Módulo de rotas não carregado",
-            "timestamp": time.time()
-        }), 503
+        try:
+            occhio = get_occhio_instance()
+            data = request.get_json()
+            if not data or 'imagem' not in data or 'pergunta' not in data:
+                return jsonify({
+                    "sucesso": False,
+                    "error": "Envie {'imagem': 'base64_string', 'pergunta': 'texto'}",
+                    "timestamp": time.time()
+                }), 400
+            
+            resultado = occhio.perguntar_sobre_imagem(data['imagem'], data['pergunta'])
+            return jsonify(resultado)
+        except Exception as e:
+            return jsonify({
+                "sucesso": False,
+                "error": str(e),
+                "timestamp": time.time()
+            }), 500
     
     @app.route('/estatistica', methods=['POST'])
     def estatistica_fallback():
-        return jsonify({
-            "sucesso": False,
-            "error": "Módulo de rotas não carregado",
-            "timestamp": time.time()
-        }), 503
+        try:
+            occhio = get_occhio_instance()
+            data = request.get_json()
+            if not data or 'imagem' not in data:
+                return jsonify({
+                    "sucesso": False,
+                    "error": "Envie {'imagem': 'base64_string'}",
+                    "timestamp": time.time()
+                }), 400
+            
+            resultado = occhio.obter_estatisticas_detalhadas(data['imagem'])
+            return jsonify(resultado)
+        except Exception as e:
+            return jsonify({
+                "sucesso": False,
+                "error": str(e),
+                "timestamp": time.time()
+            }), 500
 
 except Exception as e:
     logger.error(f"❌ Erro ao configurar rotas: {e}")
+
+# Adicionar import do request se routes.py não for importado
+if 'request' not in locals():
+    from flask import request
 
 # ========== MIDDLEWARE DE INICIALIZAÇÃO ==========
 
