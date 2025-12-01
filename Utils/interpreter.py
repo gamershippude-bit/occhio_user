@@ -1,10 +1,11 @@
 """
-Interpreter - Versão CORRIGIDA: Agora responde perguntas gerais também
+Interpreter - Versão OTMIIZADA para as rotas específicas
 """
 
 import logging
 import os
 import time
+import math
 from openai import OpenAI
 from collections import Counter
 
@@ -20,15 +21,28 @@ class Interpreter:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.client = None
 
-        # Lista de objetos relevantes (apenas para filtragem)
-        self.objetos_relevantes = {
-            'pessoas': ['person', 'people', 'human'],
-            'móveis': ['chair', 'couch', 'sofa', 'bed', 'table', 'dining table', 'desk'],
-            'eletrônicos': ['laptop', 'computer', 'tv', 'television', 'cell phone', 'mobile phone', 'monitor', 'keyboard', 'mouse'],
-            'utensílios': ['cup', 'bottle', 'book', 'vase', 'clock', 'umbrella', 'plate', 'bowl'],
-            'animais': ['dog', 'cat', 'bird'],
-            'veículos': ['car', 'bicycle', 'motorcycle'],
-            'roupas': ['backpack', 'handbag', 'suitcase', 'tie', 'hat', 'shoe']
+        # Dicionário de objetos que sabemos identificar
+        self.objetos_conhecidos = {
+            'pessoa': ['person', 'people', 'human'],
+            'cadeira': ['chair'],
+            'sofá': ['couch', 'sofa'],
+            'mesa': ['table', 'dining table', 'desk'],
+            'cama': ['bed'],
+            'computador': ['laptop', 'computer', 'monitor'],
+            'televisão': ['tv', 'television'],
+            'celular': ['cell phone', 'mobile phone'],
+            'livro': ['book'],
+            'garrafa': ['bottle'],
+            'copo': ['cup'],
+            'prato': ['plate'],
+            'vaso': ['vase'],
+            'relógio': ['clock'],
+            'cachorro': ['dog'],
+            'gato': ['cat'],
+            'carro': ['car'],
+            'bicicleta': ['bicycle'],
+            'mochila': ['backpack'],
+            'bolsa': ['handbag']
         }
 
         if not self.api_key:
@@ -41,292 +55,337 @@ class Interpreter:
                 logger.error(f"❌ Falha ao inicializar cliente OpenAI: {e}")
                 self.client = None
 
-    # ========== MÉTODOS DE PROCESSAMENTO DE DETECÇÕES ==========
+    # ========== NOVA FUNÇÃO PARA /processar ==========
 
-    def processar_deteccoes(self, objetos_detectados, faces_detectadas=None):
+    def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
         """
-        Endpoint /processar
-        Processa detecções e retorna objetos com coordenadas, nomes e confiabilidade
+        PARA ROTA /processar - Gera descrição natural do ambiente
+        Usa IA generativa para criar uma descrição fluida e natural
         """
-        logger.info("🔄 Processando detecções para endpoint /processar")
+        logger.info("🌄 Gerando descrição natural do ambiente")
         
-        start_time = time.time()
+        if not self.client:
+            return "Sistema de visão ativo. Entre em contato para mais detalhes."
         
-        # Processar objetos detectados
-        objetos_processados = []
-        if objetos_detectados:
-            for i, obj in enumerate(objetos_detectados, 1):
-                nome_objeto = obj.get('name', 'desconhecido')
-                confianca = obj.get('confidence', 0)
-                bbox = obj.get('bbox', {})
-                
-                objeto_info = {
-                    'id': i,
-                    'nome': self._traduzir_objeto(nome_objeto),
-                    'nome_ingles': nome_objeto,
-                    'confiabilidade': f"{confianca:.1%}",
-                    'confianca_decimal': confianca,
-                    'coordenadas': {
-                        'x': bbox.get('x', 0),
-                        'y': bbox.get('y', 0),
-                        'width': bbox.get('width', 0),
-                        'height': bbox.get('height', 0)
-                    }
-                }
-                objetos_processados.append(objeto_info)
-        
-        # Processar faces detectadas
-        faces_processadas = []
-        if faces_detectadas:
-            for i, face in enumerate(faces_detectadas, 1):
-                nome_face = face.get('name', 'Desconhecido')
-                confianca_face = face.get('confidence', 0)
-                bbox_face = face.get('bbox', {})
-                
-                face_info = {
-                    'id': i,
-                    'nome': nome_face,
-                    'tipo': 'conhecida' if nome_face != 'Desconhecido' else 'desconhecida',
-                    'confiabilidade': f"{confianca_face:.1%}",
-                    'confianca_decimal': confianca_face,
-                    'coordenadas': {
-                        'x': bbox_face.get('x', 0),
-                        'y': bbox_face.get('y', 0),
-                        'width': bbox_face.get('width', 0),
-                        'height': bbox_face.get('height', 0)
-                    }
-                }
-                faces_processadas.append(face_info)
-        
-        processing_time = time.time() - start_time
-        
-        resposta = {
-            'sucesso': True,
-            'timestamp': time.time(),
-            'tempo_processamento': f"{processing_time:.2f}s",
-            'resumo': {
-                'total_objetos': len(objetos_processados),
-                'total_faces': len(faces_processadas),
-                'faces_conhecidas': len([f for f in faces_processadas if f['tipo'] == 'conhecida']),
-                'faces_desconhecidas': len([f for f in faces_processadas if f['tipo'] == 'desconhecida'])
-            },
-            'deteccoes_detalhadas': {
-                'objetos': objetos_processados,
-                'faces': faces_processadas
-            }
-        }
-        
-        logger.info(f"✅ Processamento concluído: {len(objetos_processados)} objetos, {len(faces_processadas)} faces")
-        return resposta
-
-    def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """
-        Endpoint /perguntar
-        Recebe pergunta e retorna resposta inteligente baseada no contexto
-        """
-        logger.info(f"❓ Processando pergunta: '{pergunta}'")
-        
-        start_time = time.time()
-        
-        # Classificar inteligentemente o tipo de pergunta
-        tipo_pergunta = self._classificar_pergunta_simples(pergunta)
-        
-        # Filtrar objetos relevantes
+        # Preparar dados das detecções
         objetos_filtrados = self._filtrar_objetos_relevantes(
             [obj.get('name', '') for obj in (objetos_detectados or [])]
-        ) if objetos_detectados else []
-        
-        logger.info(f"🔍 Pergunta classificada como: {tipo_pergunta}")
-        
-        if tipo_pergunta == "imagem":
-            # Pergunta sobre a imagem atual
-            resposta_imagem = self._gerar_resposta_sobre_imagem(pergunta, objetos_filtrados, faces_nomes or [])
-            correlacao = True
-            dados_utilizados = self._formatar_dados_para_resposta(len(faces_nomes or []), Counter(objetos_filtrados))
-            
-        else:
-            # Pergunta geral sobre o mundo - AGORA SEMPRE RESPONDE
-            resposta_imagem = self._responder_pergunta_geral(pergunta)
-            correlacao = False
-            dados_utilizados = "Pergunta geral sobre o mundo - sem dados da imagem"
-        
-        processing_time = time.time() - start_time
-        
-        resposta = {
-            'sucesso': True,
-            'timestamp': time.time(),
-            'tempo_processamento': f"{processing_time:.2f}s",
-            'pergunta': pergunta,
-            'correlacao_com_imagem': correlacao,
-            'resposta': resposta_imagem,
-            'dados_utilizados': dados_utilizados,
-            'tipo_pergunta': tipo_pergunta
-        }
-        
-        logger.info(f"✅ Pergunta processada - Tipo: {tipo_pergunta}, Correlação: {correlacao}")
-        return resposta
-
-    def obter_estatisticas(self, objetos_detectados, faces_detectadas=None):
-        """
-        Endpoint /estatistica
-        Retorna dados específicos: tudo identificado, precisão, tempo, quantidades
-        """
-        logger.info("📊 Gerando estatísticas detalhadas")
-        
-        start_time = time.time()
-        
-        # Contagens detalhadas
-        objetos_nomes = [obj.get('name', 'desconhecido') for obj in objetos_detectados]
-        contador_objetos = Counter(objetos_nomes)
-        
-        # Estatísticas de confiança
-        confiancas_objetos = [obj.get('confidence', 0) for obj in objetos_detectados]
-        confiancas_faces = [face.get('confidence', 0) for face in (faces_detectadas or [])]
-        
-        # Processar métricas
-        estatisticas = {
-            'contagens': {
-                'total_objetos': len(objetos_detectados),
-                'total_faces': len(faces_detectadas or []),
-                'objetos_por_tipo': {
-                    self._traduzir_objeto(nome): quantidade 
-                    for nome, quantidade in contador_objetos.items()
-                },
-                'faces_conhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') != 'Desconhecido']),
-                'faces_desconhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') == 'Desconhecido'])
-            },
-            'precisao': {
-                'confianca_media_objetos': f"{sum(confiancas_objetos) / len(confiancas_objetos):.1%}" if confiancas_objetos else "0%",
-                'confianca_media_faces': f"{sum(confiancas_faces) / len(confiancas_faces):.1%}" if confiancas_faces else "0%",
-                'confianca_maxima_objetos': f"{max(confiancas_objetos):.1%}" if confiancas_objetos else "0%",
-                'confianca_minima_objetos': f"{min(confiancas_objetos):.1%}" if confiancas_objetos else "0%"
-            },
-            'deteccoes_detalhadas': {
-                'objetos': [
-                    {
-                        'nome': self._traduzir_objeto(obj.get('name', 'desconhecido')),
-                        'nome_ingles': obj.get('name', 'desconhecido'),
-                        'confianca': f"{obj.get('confidence', 0):.1%}",
-                        'coordenadas': obj.get('bbox', {})
-                    }
-                    for obj in objetos_detectados
-                ],
-                'faces': [
-                    {
-                        'nome': face.get('name', 'Desconhecido'),
-                        'tipo': 'conhecida' if face.get('name', 'Desconhecido') != 'Desconhecido' else 'desconhecida',
-                        'confianca': f"{face.get('confidence', 0):.1%}",
-                        'coordenadas': face.get('bbox', {})
-                    }
-                    for face in (faces_detectadas or [])
-                ]
-            }
-        }
-        
-        processing_time = time.time() - start_time
-        estatisticas['tempo_processamento'] = f"{processing_time:.2f}s"
-        estatisticas['timestamp'] = time.time()
-        
-        logger.info(f"✅ Estatísticas geradas: {estatisticas['contagens']['total_objetos']} objetos, {estatisticas['contagens']['total_faces']} faces")
-        return estatisticas
-
-    def processamento_completo(self, objetos_detectados, faces_detectadas=None, pergunta=None):
-        """
-        Endpoint /completo
-        Junta todos os processamentos em sequência
-        """
-        logger.info("🎯 Iniciando processamento completo")
-        
-        start_time = time.time()
-        
-        # Executar todos os processamentos
-        resultado_processar = self.processar_deteccoes(objetos_detectados, faces_detectadas)
-        resultado_estatisticas = self.obter_estatisticas(objetos_detectados, faces_detectadas)
-        
-        # Se há pergunta, incluir também
-        resultado_pergunta = None
-        if pergunta:
-            faces_nomes = [face.get('name', 'Desconhecido') for face in (faces_detectadas or [])]
-            resultado_pergunta = self.perguntar_sobre_imagem(pergunta, objetos_detectados, faces_nomes)
-        
-        processing_time = time.time() - start_time
-        
-        # Consolidar resultados
-        resposta_completa = {
-            'sucesso': True,
-            'timestamp': time.time(),
-            'tempo_total_processamento': f"{processing_time:.2f}s",
-            'processar': resultado_processar,
-            'estatisticas': resultado_estatisticas,
-        }
-        
-        if resultado_pergunta:
-            resposta_completa['perguntar'] = resultado_pergunta
-        
-        # Adicionar resumo inteligente
-        resposta_completa['resumo_inteligente'] = self._gerar_resumo_inteligente(
-            resultado_estatisticas['contagens'],
-            resultado_pergunta['resposta'] if resultado_pergunta else None
         )
         
-        logger.info("✅ Processamento completo finalizado")
-        return resposta_completa
-
-    # ========== MÉTODOS AUXILIARES CORRIGIDOS ==========
-
-    def _classificar_pergunta_simples(self, pergunta):
-        """Classificação SIMPLES e CONFIÁVEL de perguntas"""
-        pergunta_lower = pergunta.lower().strip()
+        contador_objetos = Counter(objetos_filtrados)
+        total_pessoas = len(faces_nomes or [])
+        faces_conhecidas = [nome for nome in (faces_nomes or []) if nome != 'Desconhecido']
         
-        # Palavras-chave para perguntas sobre IMAGEM
-        palavras_imagem = [
-            'pessoa', 'pessoas', 'gente', 'humano', 'pessoal',
-            'cadeira', 'mesa', 'sofá', 'cama', 'livro', 'carro', 'computador',
-            'quantas', 'quantos', 'tem ', 'há ', 'existe', 'existem',
-            'onde ', 'local ', 'lugar ', 'ambiente', 'sala', 'quarto',
-            'descreva', 'descrever', 'mostre', 'mostrar', 'vejo', 'vê',
-            'foto', 'imagem', 'fotografia', 'cena', 'cenário',
-            'objeto', 'objetos', 'coisa', 'coisas', 'item', 'itens',
-            'rosto', 'face', 'faces', 'identifique', 'reconheça'
-        ]
+        # Construir contexto para a IA
+        contexto = self._construir_contexto_descricao(contador_objetos, total_pessoas, faces_conhecidas)
         
-        # Palavras-chave para perguntas GERAIS (sobre o mundo)
-        palavras_gerais = [
-            'céu', 'ceu', 'azul', 'porque', 'por que', 'porquê',
-            'planeta', 'planetas', 'universo', 'terra', 'marte',
-            'história', 'historia', 'brasil', 'país', 'país',
-            'capital', 'cidade', 'estado', 'presidente', 'governo',
-            'comida', 'bebida', 'água', 'agua', 'música', 'musica',
-            'filme', 'cinema', 'arte', 'ciência', 'ciencia',
-            'matemática', 'matematica', 'física', 'fisica', 'química', 'quimica'
-        ]
-        
-        # Verificar se é pergunta geral primeiro (mais específico)
-        for palavra in palavras_gerais:
-            if palavra in pergunta_lower:
-                logger.info(f"🔍 Classificação SIMPLES: '{pergunta}' → GERAL")
-                return "geral"
-        
-        # Verificar se é pergunta sobre imagem
-        for palavra in palavras_imagem:
-            if palavra in pergunta_lower:
-                logger.info(f"🔍 Classificação SIMPLES: '{pergunta}' → IMAGEM")
-                return "imagem"
-        
-        # Fallback: usar classificação inteligente se disponível
-        if self.client:
-            return self._classificar_pergunta_inteligente(pergunta)
-        else:
-            logger.info(f"🔍 Classificação FALLBACK: '{pergunta}' → IMAGEM")
-            return "imagem"
-
-    def _classificar_pergunta_inteligente(self, pergunta):
-        """Classificação com ChatGPT (fallback)"""
         try:
             messages = [
                 {
                     "role": "system",
-                    "content": "Classifique a pergunta como 'imagem' se for sobre o conteúdo visual atual, ou 'geral' se for sobre conhecimento do mundo. Responda APENAS com 'imagem' ou 'geral'."
+                    "content": """Você é um assistente visual que ajuda pessoas com deficiência visual.
+                    Crie uma descrição NATURAL e FLUIDA do ambiente baseada nos dados detectados.
+                    Seja descritivo, mas objetivo. Use linguagem natural como se estivesse descrevendo para alguém.
+                    Inclua pessoas, objetos principais e o contexto geral.
+                    Mantenha a descrição concisa mas informativa."""
+                },
+                {
+                    "role": "user", 
+                    "content": f"Com base nestas detecções: {contexto}. Por favor, descreva o ambiente de forma natural:"
+                }
+            ]
+
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=150,
+                temperature=0.3,
+            )
+            
+            descricao = response.choices[0].message.content.strip()
+            logger.info(f"✅ Descrição natural gerada: {descricao[:50]}...")
+            return descricao
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao gerar descrição natural: {e}")
+            return self._gerar_descricao_fallback(contador_objetos, total_pessoas, faces_conhecidas)
+
+    def _construir_contexto_descricao(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Constrói contexto para a descrição natural"""
+        partes = []
+        
+        # Informações sobre pessoas
+        if total_pessoas > 0:
+            if faces_conhecidas:
+                nomes = ", ".join(faces_conhecidas)
+                partes.append(f"Pessoas presentes: {nomes}")
+            else:
+                partes.append(f"{total_pessoas} pessoa{'s' if total_pessoas > 1 else ''} no ambiente")
+        
+        # Informações sobre objetos
+        objetos_desc = []
+        for obj_ingles, quantidade in contador_objetos.items():
+            obj_pt = self._traduzir_objeto(obj_ingles)
+            if quantidade == 1:
+                objetos_desc.append(f"1 {obj_pt}")
+            else:
+                objetos_desc.append(f"{quantidade} {obj_pt}s")
+        
+        if objetos_desc:
+            partes.append("Objetos detectados: " + ", ".join(objetos_desc))
+        
+        if not partes:
+            return "Ambiente aparentemente vazio ou poucos objetos detectados"
+        
+        return ". ".join(partes)
+
+    def _gerar_descricao_fallback(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Gera descrição fallback caso a IA falhe"""
+        partes = []
+        
+        if total_pessoas > 0:
+            if faces_conhecidas:
+                partes.append(f"Identifiquei {', '.join(faces_conhecidas)} no ambiente.")
+            else:
+                partes.append(f"Vejo {total_pessoas} pessoa{'s' if total_pessoas > 1 else ''}.")
+        
+        objetos_principais = list(contador_objetos.items())[:3]  # Limitar a 3 objetos principais
+        if objetos_principais:
+            obj_desc = []
+            for obj_ingles, quantidade in objetos_principais:
+                obj_pt = self._traduzir_objeto(obj_ingles)
+                obj_desc.append(f"{quantidade} {obj_pt}{'s' if quantidade > 1 else ''}")
+            
+            partes.append("Também vejo " + ", ".join(obj_desc) + ".")
+        
+        if not partes:
+            return "Ambiente tranquilo, com poucos elementos visíveis no momento."
+        
+        return " ".join(partes)
+
+    # ========== MÉTODOS PRINCIPAIS PARA AS ROTAS ==========
+
+    def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
+        """
+        PARA ROTA /perguntar - Chat com IA sobre a imagem
+        Responde tanto perguntas sobre a imagem quanto perguntas gerais
+        """
+        logger.info(f"💬 Processando pergunta para chat: '{pergunta}'")
+        
+        start_time = time.time()
+        
+        # Classificar o tipo de pergunta
+        tipo_pergunta = self._classificar_tipo_pergunta(pergunta)
+        logger.info(f"🔍 Pergunta classificada como: {tipo_pergunta}")
+        
+        if tipo_pergunta == "sobre_imagem":
+            # Pergunta sobre a imagem - usar dados detectados
+            resposta = self._responder_sobre_imagem(pergunta, objetos_detectados, faces_nomes)
+            correlacao = True
+        else:
+            # Pergunta geral - usar apenas OpenAI
+            resposta = self._responder_pergunta_geral(pergunta)
+            correlacao = False
+        
+        processing_time = time.time() - start_time
+        
+        return {
+            'sucesso': True,
+            'timestamp': time.time(),
+            'tempo_processamento': f"{processing_time:.2f}s",
+            'pergunta': pergunta,
+            'resposta': resposta,
+            'tipo_pergunta': tipo_pergunta,
+            'correlacao_com_imagem': correlacao,
+            'dados_utilizados': self._formatar_dados_utilizados(objetos_detectados, faces_nomes) if correlacao else "Pergunta geral"
+        }
+
+    def obter_estatisticas(self, objetos_detectados, faces_detectadas=None):
+        """
+        PARA ROTA /estatistica - Dados técnicos detalhados
+        Retorna métricas, precisões e logs para análise
+        """
+        logger.info("📊 Gerando estatísticas técnicas")
+        
+        start_time = time.time()
+        
+        # Processar objetos detectados
+        objetos_processados = self._processar_objetos_estatisticas(objetos_detectados)
+        faces_processadas = self._processar_faces_estatisticas(faces_detectadas or [])
+        
+        # Calcular métricas de precisão (SEM NUMPY)
+        metricas_precisao = self._calcular_metricas_precisao(objetos_detectados, faces_detectadas)
+        
+        # Gerar análise técnica
+        analise_tecnica = self._gerar_analise_tecnica(objetos_processados, faces_processadas)
+        
+        processing_time = time.time() - start_time
+        
+        return {
+            'sucesso': True,
+            'timestamp': time.time(),
+            'tempo_processamento': f"{processing_time:.2f}s",
+            'contagens': {
+                'total_objetos': len(objetos_detectados),
+                'total_faces': len(faces_detectadas or []),
+                'objetos_por_categoria': self._agrupar_objetos_por_categoria(objetos_detectados),
+                'faces_conhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') != 'Desconhecido']),
+                'faces_desconhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') == 'Desconhecido'])
+            },
+            'precisao': metricas_precisao,
+            'deteccoes_detalhadas': {
+                'objetos': objetos_processados,
+                'faces': faces_processadas
+            },
+            'analise_tecnica': analise_tecnica,
+            'logs_diagnostico': self._gerar_logs_diagnostico(objetos_detectados, faces_detectadas)
+        }
+
+    # ========== MÉTODOS DE PROCESSAMENTO DE ESTATÍSTICAS (CORRIGIDOS) ==========
+
+    def _processar_objetos_estatisticas(self, objetos_detectados):
+        """Processa objetos para estatísticas detalhadas"""
+        objetos_processados = []
+        
+        for i, obj in enumerate(objetos_detectados, 1):
+            nome_ingles = obj.get('name', 'desconhecido')
+            confianca = obj.get('confidence', 0)
+            bbox = obj.get('bbox', {})
+            
+            objeto_info = {
+                'id': i,
+                'nome_pt': self._traduzir_objeto(nome_ingles),
+                'nome_en': nome_ingles,
+                'confianca': confianca,
+                'confianca_percentual': f"{confianca:.1%}",
+                'categoria': self._classificar_categoria(nome_ingles),
+                'coordenadas': bbox,
+                'area': bbox.get('width', 0) * bbox.get('height', 0) if bbox else 0,
+                'nivel_confianca': self._classificar_nivel_confianca(confianca)
+            }
+            objetos_processados.append(objeto_info)
+        
+        return objetos_processados
+
+    def _processar_faces_estatisticas(self, faces_detectadas):
+        """Processa faces para estatísticas detalhadas"""
+        faces_processadas = []
+        
+        for i, face in enumerate(faces_detectadas, 1):
+            nome = face.get('name', 'Desconhecido')
+            confianca = face.get('confidence', 0)
+            bbox = face.get('bbox', {})
+            
+            face_info = {
+                'id': i,
+                'nome': nome,
+                'tipo': 'conhecida' if nome != 'Desconhecido' else 'desconhecida',
+                'confianca': confianca,
+                'confianca_percentual': f"{confianca:.1%}",
+                'coordenadas': bbox,
+                'area_rosto': bbox.get('width', 0) * bbox.get('height', 0) if bbox else 0,
+                'nivel_confianca': self._classificar_nivel_confianca(confianca)
+            }
+            faces_processadas.append(face_info)
+        
+        return faces_processadas
+
+    def _calcular_metricas_precisao(self, objetos_detectados, faces_detectadas):
+        """Calcula métricas de precisão detalhadas (SEM NUMPY)"""
+        confiancas_objetos = [obj.get('confidence', 0) for obj in objetos_detectados]
+        confiancas_faces = [face.get('confidence', 0) for face in (faces_detectadas or [])]
+        
+        # Cálculos manuais sem numpy
+        def calcular_media(lista):
+            return sum(lista) / len(lista) if lista else 0
+        
+        def calcular_desvio_padrao(lista):
+            if not lista:
+                return 0
+            media = calcular_media(lista)
+            variancia = sum((x - media) ** 2 for x in lista) / len(lista)
+            return math.sqrt(variancia)
+        
+        return {
+            'confianca_media_objetos': calcular_media(confiancas_objetos),
+            'confianca_media_faces': calcular_media(confiancas_faces),
+            'confianca_maxima_objetos': max(confiancas_objetos) if confiancas_objetos else 0,
+            'confianca_minima_objetos': min(confiancas_objetos) if confiancas_objetos else 0,
+            'desvio_padrao_objetos': calcular_desvio_padrao(confiancas_objetos),
+            'objetos_alta_confianca': len([c for c in confiancas_objetos if c > 0.7]),
+            'objetos_baixa_confianca': len([c for c in confiancas_objetos if c < 0.3])
+        }
+
+    def _gerar_analise_tecnica(self, objetos_processados, faces_processadas):
+        """Gera análise técnica dos dados"""
+        total_objetos = len(objetos_processados)
+        total_faces = len(faces_processadas)
+        
+        if total_objetos == 0 and total_faces == 0:
+            return "Nenhum objeto ou face detectado - verifique qualidade da imagem"
+        
+        analise = []
+        
+        # Análise de objetos
+        if total_objetos > 0:
+            categorias = Counter([obj['categoria'] for obj in objetos_processados])
+            categoria_principal = categorias.most_common(1)[0][0] if categorias else "diversos"
+            
+            analise.append(f"Ambiente com {total_objetos} objetos, predominância de {categoria_principal}")
+        
+        # Análise de faces
+        if total_faces > 0:
+            faces_conhecidas = len([f for f in faces_processadas if f['tipo'] == 'conhecida'])
+            if faces_conhecidas > 0:
+                analise.append(f"{faces_conhecidas} face(s) conhecida(s) identificada(s)")
+            if total_faces - faces_conhecidas > 0:
+                analise.append(f"{total_faces - faces_conhecidas} face(s) desconhecida(s)")
+        
+        return ". ".join(analise)
+
+    # ========== MÉTODOS DE RESPOSTA INTELIGENTE ==========
+
+    def _classificar_tipo_pergunta(self, pergunta):
+        """Classifica se a pergunta é sobre a imagem ou geral"""
+        pergunta_lower = pergunta.lower()
+        
+        # Palavras-chave que indicam pergunta sobre a imagem
+        palavras_imagem = [
+            'essa imagem', 'esta foto', 'nesta imagem', 'nesta foto',
+            'o que tem', 'quem está', 'quantos', 'quantas', 'onde está',
+            'vejo', 'vê', 'identifique', 'reconhece', 'descreva',
+            'tem ', 'há ', 'existe', 'existem', 'mostre', 'mostrar'
+        ]
+        
+        # Palavras-chave que indicam pergunta geral
+        palavras_gerais = [
+            'o que é', 'como funciona', 'qual é', 'quem foi',
+            'história', 'explicar', 'definir', 'significado'
+        ]
+        
+        # Verificar primeiro perguntas gerais (mais específicas)
+        for palavra in palavras_gerais:
+            if palavra in pergunta_lower:
+                return "geral"
+        
+        # Verificar perguntas sobre imagem
+        for palavra in palavras_imagem:
+            if palavra in pergunta_lower:
+                return "sobre_imagem"
+        
+        # Se não identificar claramente, usar classificação inteligente
+        return self._classificar_com_ia(pergunta)
+
+    def _classificar_com_ia(self, pergunta):
+        """Usa IA para classificar perguntas ambíguas"""
+        if not self.client:
+            return "sobre_imagem"  # Fallback seguro
+        
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Classifique se a pergunta é 'sobre_imagem' (sobre o conteúdo visual atual) ou 'geral' (sobre conhecimento do mundo). Responda APENAS com 'sobre_imagem' ou 'geral'."
                 },
                 {
                     "role": "user", 
@@ -342,230 +401,215 @@ class Interpreter:
             )
             
             classificacao = response.choices[0].message.content.strip().lower()
-            logger.info(f"🔍 Classificação INTELIGENTE: '{pergunta}' → {classificacao}")
-            
-            return "imagem" if "imagem" in classificacao else "geral"
+            return "sobre_imagem" if "imagem" in classificacao else "geral"
                 
         except Exception as e:
-            logger.error(f"❌ Erro ao classificar pergunta: {e}")
-            return "imagem"
+            logger.error(f"❌ Erro ao classificar pergunta com IA: {e}")
+            return "sobre_imagem"  # Fallback seguro
 
-    def _gerar_resposta_sobre_imagem(self, pergunta, objetos_filtrados, faces_nomes):
-        """Gera resposta para perguntas sobre a imagem"""
-        objetos_contador = Counter(objetos_filtrados)
-        total_pessoas_faces = len(faces_nomes or [])
-        objetos_sem_pessoas = {obj: count for obj, count in objetos_contador.items() if obj != 'person'}
+    def _responder_sobre_imagem(self, pergunta, objetos_detectados, faces_nomes):
+        """Responde perguntas sobre a imagem usando dados detectados"""
+        # Filtrar objetos relevantes
+        objetos_relevantes = self._filtrar_objetos_relevantes(
+            [obj.get('name', '') for obj in (objetos_detectados or [])]
+        )
         
-        logger.info(f"🔍 Dados para resposta: {total_pessoas_faces} pessoas, {dict(objetos_sem_pessoas)} objetos")
+        # Contar ocorrências
+        contador_objetos = Counter(objetos_relevantes)
+        total_pessoas = len(faces_nomes or [])
         
-        pergunta_lower = pergunta.lower()
-        
-        # PERGUNTAS ESPECÍFICAS SOBRE OBJETOS
-        for obj_ingles, obj_portugues in self._obter_traducoes().items():
-            if obj_portugues in pergunta_lower:
-                quantidade = objetos_sem_pessoas.get(obj_ingles, 0)
-                if quantidade > 0:
-                    return f"Sim, detectei {quantidade} {obj_portugues}{'s' if quantidade > 1 else ''} na imagem."
-                else:
-                    return f"Não, não detectei {obj_portugues}s na imagem."
-        
-        # PERGUNTAS SOBRE PESSOAS
-        if any(palavra in pergunta_lower for palavra in ['pessoa', 'pessoas', 'gente', 'humano', 'quantas pessoas']):
-            if total_pessoas_faces > 0:
-                return f"Detectei {total_pessoas_faces} pessoa{'s' if total_pessoas_faces > 1 else ''} na imagem."
-            else:
-                return "Não detectei pessoas na imagem."
-        
-        # PERGUNTAS SOBRE O AMBIENTE
-        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'mostre', 'ambiente', 'cena']):
-            return self._gerar_descricao_ambiente(total_pessoas_faces, objetos_sem_pessoas)
-        
-        # RESPOSTA PADRÃO BASEADA NOS DADOS
-        return self._gerar_resposta_base_dados(total_pessoas_faces, objetos_sem_pessoas, pergunta)
+        # Se temos OpenAI, usar para resposta contextual
+        if self.client:
+            return self._responder_com_ia_contextual(pergunta, contador_objetos, total_pessoas)
+        else:
+            # Fallback: resposta baseada em regras
+            return self._responder_base_regras(pergunta, contador_objetos, total_pessoas)
 
-    def _gerar_resposta_base_dados(self, total_pessoas, objetos_contador, pergunta_original):
-        """Gera resposta baseada nos dados detectados"""
-        if total_pessoas == 0 and not objetos_contador:
-            return "Não detectei pessoas ou objetos específicos nesta imagem."
-        
-        # Resposta direta e honesta
-        return self._gerar_resposta_direta_honesta(total_pessoas, objetos_contador)
-
-    def _responder_pergunta_geral(self, pergunta):
-        """
-        Responde perguntas gerais sobre o mundo
-        AGORA SEMPRE TENTA RESPONDER, NÃO BLOQUEIA MAIS
-        """
-        if not self.client:
-            return "Desculpe, não posso responder perguntas gerais no momento."
-        
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Você é um assistente útil. "
-                    "Responda perguntas gerais de forma clara, direta e em português. "
-                    "Seja conciso e objetivo."
-                )
-            },
-            {
-                "role": "user", 
-                "content": pergunta
-            }
-        ]
-
+    def _responder_com_ia_contextual(self, pergunta, contador_objetos, total_pessoas):
+        """Resposta contextual usando OpenAI"""
         try:
+            # Preparar contexto dos dados detectados
+            contexto_deteccoes = self._formatar_contexto_deteccoes(contador_objetos, total_pessoas)
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"""
+                    Você é um assistente visual que ajuda deficientes visuais.
+                    Baseie sua resposta NOS DADOS DISPONÍVEIS sobre a imagem:
+                    
+                    {contexto_deteccoes}
+                    
+                    Seja direto, útil e baseado apenas nos dados fornecidos.
+                    Se não houver dados relevantes, diga isso claramente.
+                    Responda em português.
+                    """
+                },
+                {
+                    "role": "user", 
+                    "content": pergunta
+                }
+            ]
+
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                max_tokens=150,
+                max_tokens=200,
                 temperature=0.1,
             )
-            resposta = response.choices[0].message.content.strip()
-            logger.info(f"💬 Resposta geral: {resposta}")
-            return resposta  # ← SEMPRE RETORNA RESPOSTA DO GPT
+            
+            return response.choices[0].message.content.strip()
+                
         except Exception as e:
-            logger.error(f"❌ Erro OpenAI: {e}")
-            return "Desculpe, não consegui processar sua pergunta."
+            logger.error(f"❌ Erro ao responder com IA: {e}")
+            return self._responder_base_regras(pergunta, contador_objetos, total_pessoas)
 
-    def _gerar_descricao_ambiente(self, total_pessoas, objetos_contador):
-        """Gera descrição do ambiente"""
-        partes = []
+    def _responder_pergunta_geral(self, pergunta):
+        """Responde perguntas gerais sobre o mundo"""
+        if not self.client:
+            return "Desculpe, não posso responder perguntas gerais no momento."
         
-        if total_pessoas > 0:
-            if total_pessoas == 1:
-                partes.append("1 pessoa")
-            else:
-                partes.append(f"{total_pessoas} pessoas")
-        
-        for obj, count in objetos_contador.items():
-            obj_traduzido = self._traduzir_objeto(obj)
-            if count == 1:
-                partes.append(f"1 {obj_traduzido}")
-            else:
-                partes.append(f"{count} {obj_traduzido}s")
-        
-        if not partes:
-            return "O ambiente parece estar vazio ou não consegui identificar objetos específicos."
-        
-        if len(partes) == 1:
-            return f"Detectei {partes[0]}."
-        elif len(partes) == 2:
-            return f"Detectei {partes[0]} e {partes[1]}."
-        else:
-            return "Detectei " + ", ".join(partes[:-1]) + " e " + partes[-1] + "."
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Você é um assistente útil. Responda perguntas gerais de forma clara e em português. Seja conciso e objetivo."
+                },
+                {
+                    "role": "user", 
+                    "content": pergunta
+                }
+            ]
 
-    # ========== MÉTODOS AUXILIARES BÁSICOS ==========
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=200,
+                temperature=0.1,
+            )
+            
+            return response.choices[0].message.content.strip()
+                
+        except Exception as e:
+            logger.error(f"❌ Erro ao responder pergunta geral: {e}")
+            return "Desculpe, não consegui processar sua pergunta no momento."
+
+    # ========== MÉTODOS AUXILIARES ==========
 
     def _filtrar_objetos_relevantes(self, objetos_detectados):
-        """Filtra objetos - APENAS os que sabemos identificar"""
-        if not objetos_detectados:
-            return []
-        
+        """Filtra apenas objetos que conhecemos"""
         objetos_filtrados = []
+        todos_objetos = [obj for lista in self.objetos_conhecidos.values() for obj in lista]
         
         for obj in objetos_detectados:
-            obj_lower = obj.lower().strip()
-            
-            for categoria, objetos in self.objetos_relevantes.items():
-                if obj_lower in objetos:
-                    objetos_filtrados.append(obj)
-                    break
+            if obj.lower() in todos_objetos:
+                objetos_filtrados.append(obj)
         
         return objetos_filtrados
 
     def _traduzir_objeto(self, objeto_ingles):
-        """Traduz objetos do inglês para português"""
-        traducoes = self._obter_traducoes()
-        return traducoes.get(objeto_ingles.lower(), objeto_ingles)
+        """Traduz objeto do inglês para português"""
+        for pt, en_list in self.objetos_conhecidos.items():
+            if objeto_ingles.lower() in en_list:
+                return pt
+        return objeto_ingles
 
-    def _obter_traducoes(self):
-        """Retorna dicionário de traduções"""
-        return {
-            'person': 'pessoa', 'people': 'pessoas', 'human': 'pessoa',
-            'chair': 'cadeira', 'couch': 'sofá', 'sofa': 'sofá', 'bed': 'cama',
-            'table': 'mesa', 'dining table': 'mesa de jantar', 'desk': 'escritório',
-            'laptop': 'laptop', 'computer': 'computador', 'tv': 'televisão',
-            'television': 'televisão', 'cell phone': 'celular', 'mobile phone': 'celular',
-            'monitor': 'monitor', 'keyboard': 'teclado', 'mouse': 'mouse',
-            'cup': 'copo', 'bottle': 'garrafa', 'book': 'livro', 'vase': 'vaso',
-            'clock': 'relógio', 'umbrella': 'guarda-chuva', 'plate': 'prato',
-            'bowl': 'tigela', 'dog': 'cachorro', 'cat': 'gato', 'bird': 'pássaro',
-            'car': 'carro', 'bicycle': 'bicicleta', 'motorcycle': 'motocicleta',
-            'backpack': 'mochila', 'handbag': 'bolsa', 'suitcase': 'mala',
-            'tie': 'gravata', 'hat': 'chapéu', 'shoe': 'sapato'
-        }
+    def _classificar_categoria(self, objeto_ingles):
+        """Classifica objeto em categoria"""
+        for categoria, objetos in self.objetos_conhecidos.items():
+            if objeto_ingles.lower() in objetos:
+                return categoria
+        return "outros"
 
-    def _formatar_dados_para_chatgpt(self, total_pessoas, objetos_contador):
-        """Formata os dados detectados para o ChatGPT"""
+    def _classificar_nivel_confianca(self, confianca):
+        """Classifica nível de confiança"""
+        if confianca >= 0.8:
+            return "alta"
+        elif confianca >= 0.5:
+            return "media"
+        else:
+            return "baixa"
+
+    def _agrupar_objetos_por_categoria(self, objetos_detectados):
+        """Agrupa objetos por categoria"""
+        categorias = {}
+        for obj in objetos_detectados:
+            nome = obj.get('name', 'desconhecido')
+            categoria = self._classificar_categoria(nome)
+            if categoria not in categorias:
+                categorias[categoria] = 0
+            categorias[categoria] += 1
+        return categorias
+
+    def _formatar_contexto_deteccoes(self, contador_objetos, total_pessoas):
+        """Formata dados das detecções para contexto da IA"""
         partes = []
         
         if total_pessoas > 0:
-            if total_pessoas == 1:
-                partes.append("1 pessoa")
-            else:
-                partes.append(f"{total_pessoas} pessoas")
+            partes.append(f"{total_pessoas} pessoa{'s' if total_pessoas > 1 else ''}")
         
-        for obj, count in objetos_contador.items():
-            obj_traduzido = self._traduzir_objeto(obj)
-            if count == 1:
-                partes.append(f"1 {obj_traduzido}")
-            else:
-                partes.append(f"{count} {obj_traduzido}s")
-        
-        return ", ".join(partes) if partes else "nada detectado"
-
-    def _formatar_dados_para_resposta(self, total_pessoas, objetos_contador):
-        """Formata dados para resposta do endpoint /perguntar"""
-        objetos_sem_pessoas = {obj: count for obj, count in objetos_contador.items() if obj != 'person'}
-        
-        return {
-            'pessoas_detectadas': total_pessoas,
-            'objetos_detectados': {
-                self._traduzir_objeto(obj): count 
-                for obj, count in objetos_sem_pessoas.items()
-            }
-        }
-
-    def _gerar_resposta_direta_honesta(self, total_pessoas, objetos_contador):
-        """Fallback honesto baseado nos dados reais"""
-        partes = []
-        
-        if total_pessoas > 0:
-            if total_pessoas == 1:
-                partes.append("1 pessoa")
-            else:
-                partes.append(f"{total_pessoas} pessoas")
-        
-        for obj, count in objetos_contador.items():
-            obj_traduzido = self._traduzir_objeto(obj)
-            if count == 1:
-                partes.append(f"1 {obj_traduzido}")
-            else:
-                partes.append(f"{count} {obj_traduzido}s")
+        for obj_ingles, quantidade in contador_objetos.items():
+            obj_pt = self._traduzir_objeto(obj_ingles)
+            partes.append(f"{quantidade} {obj_pt}{'s' if quantidade > 1 else ''}")
         
         if not partes:
-            return "Não detectei pessoas ou objetos específicos."
+            return "Nenhum objeto ou pessoa detectado na imagem."
         
-        if len(partes) == 1:
-            return f"Detectei {partes[0]}."
-        elif len(partes) == 2:
-            return f"Detectei {partes[0]} e {partes[1]}."
+        return "Na imagem foram detectados: " + ", ".join(partes) + "."
+
+    def _formatar_dados_utilizados(self, objetos_detectados, faces_nomes):
+        """Formata dados utilizados para resposta"""
+        if not objetos_detectados and not faces_nomes:
+            return "Nenhum dado da imagem utilizado"
+        
+        objetos_count = len(objetos_detectados or [])
+        faces_count = len(faces_nomes or [])
+        
+        return f"{objetos_count} objetos e {faces_count} faces utilizados para resposta"
+
+    def _responder_base_regras(self, pergunta, contador_objetos, total_pessoas):
+        """Resposta baseada em regras (fallback)"""
+        pergunta_lower = pergunta.lower()
+        
+        # Perguntas sobre quantidade de pessoas
+        if any(palavra in pergunta_lower for palavra in ['quantas pessoas', 'tem gente', 'tem pessoas']):
+            if total_pessoas > 0:
+                return f"Detectei {total_pessoas} pessoa{'s' if total_pessoas > 1 else ''} na imagem."
+            else:
+                return "Não detectei pessoas na imagem."
+        
+        # Perguntas sobre objetos específicos
+        for obj_pt, obj_en_list in self.objetos_conhecidos.items():
+            if obj_pt in pergunta_lower:
+                total = sum(contador_objetos.get(obj_en, 0) for obj_en in obj_en_list)
+                if total > 0:
+                    return f"Sim, detectei {total} {obj_pt}{'s' if total > 1 else ''}."
+                else:
+                    return f"Não detectei {obj_pt}s na imagem."
+        
+        # Resposta genérica
+        if contador_objetos or total_pessoas > 0:
+            return self._formatar_contexto_deteccoes(contador_objetos, total_pessoas)
         else:
-            return "Detectei " + ", ".join(partes[:-1]) + " e " + partes[-1] + "."
+            return "Não detectei objetos ou pessoas específicas nesta imagem."
 
-    def _gerar_resumo_inteligente(self, contagens, resposta_pergunta=None):
-        """Gera resumo inteligente para o endpoint completo"""
-        total_objetos = contagens['total_objetos']
-        total_faces = contagens['total_faces']
+    def _gerar_logs_diagnostico(self, objetos_detectados, faces_detectadas):
+        """Gera logs para diagnóstico técnico"""
+        logs = []
         
-        resumo = f"Análise completa: {total_objetos} objeto{'s' if total_objetos != 1 else ''} e {total_faces} pessoa{'s' if total_faces != 1 else ''} detectados."
+        # Log de distribuição de confiança
+        confiancas_obj = [obj.get('confidence', 0) for obj in objetos_detectados]
+        if confiancas_obj:
+            logs.append(f"Confiança objetos: min={min(confiancas_obj):.2f}, max={max(confiancas_obj):.2f}, avg={sum(confiancas_obj)/len(confiancas_obj):.2f}")
         
-        if resposta_pergunta:
-            resumo += f" Resposta: {resposta_pergunta}"
-            
-        return resumo
-
-    def descrever_ambiente(self, objetos_detectados=None, faces_nomes=None):
-        """Descrição do ambiente (método legado)"""
-        return self.perguntar_sobre_imagem("Descreva o que você vê nesta imagem", objetos_detectados, faces_nomes)
+        # Log de tipos de objetos
+        tipos_objetos = Counter([obj.get('name', 'desconhecido') for obj in objetos_detectados])
+        if tipos_objetos:
+            logs.append(f"Tipos objetos: {dict(tipos_objetos)}")
+        
+        # Log de faces
+        if faces_detectadas:
+            faces_conhecidas = len([f for f in faces_detectadas if f.get('name', 'Desconhecido') != 'Desconhecido'])
+            logs.append(f"Faces: {faces_conhecidas} conhecidas, {len(faces_detectadas) - faces_conhecidas} desconhecidas")
+        
+        return logs

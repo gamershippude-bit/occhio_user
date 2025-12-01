@@ -1,6 +1,6 @@
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
-VERSÃO CLOUD/API - Endpoints corrigidos com parâmetros corretos
+VERSÃO CLOUD/API - Arquivo principal
 """
 
 import cv2
@@ -15,13 +15,16 @@ import traceback
 import base64
 
 # Flask
-from flask import Flask, request, jsonify
+from flask import Flask
 
 # Utils
 from Detectors.yolo_detector import YOLODetector
 from Detectors.face_detector import FaceDetector
 from db.database import DatabaseManager
 from Utils.interpreter import Interpreter
+
+# Importar rotas
+from api import *
 
 # ================== CONFIGURAÇÃO DE LOG ==================
 logging.basicConfig(
@@ -41,7 +44,7 @@ _occhio_instance = None
 _initialization_lock = threading.Lock()
 
 class OcchioCloud:
-    """Classe otimizada para cloud - com novos endpoints baseados no interpreter"""
+    """Classe principal do sistema Occhio Cloud"""
 
     def __init__(self, api_key=None):
         try:
@@ -76,10 +79,10 @@ class OcchioCloud:
                 logger.error(f"❌ Erro Banco: {e}")
                 self.db = None
 
-            # Interpreter - NOVA VERSÃO
+            # Interpreter - Nova versão otimizada
             try:
                 self.interpreter = Interpreter(api_key=api_key)
-                logger.info("✅ Interpreter OK - Nova Versão com Endpoints")
+                logger.info("✅ Interpreter OK - Versão Otimizada")
             except Exception as e:
                 logger.error(f"❌ Erro Interpreter: {e}")
                 self.interpreter = None
@@ -92,7 +95,7 @@ class OcchioCloud:
             raise
 
     def carregar_faces_do_banco(self):
-        """Carrega faces do banco - versão simplificada"""
+        """Carrega faces do banco de dados"""
         try:
             if not self.db or not self.detector_faces:
                 return
@@ -166,7 +169,7 @@ class OcchioCloud:
             raise
 
     def _obter_deteccoes_detalhadas(self, frame):
-        """Obtém detecções detalhadas para os novos endpoints"""
+        """Obtém detecções detalhadas da imagem"""
         deteccoes = {
             "objetos": [],
             "faces": []
@@ -236,44 +239,73 @@ class OcchioCloud:
 
         return deteccoes
 
-    # ========== NOVOS ENDPOINTS BASEADOS NO INTERPRETER ==========
+    # ========== MÉTODOS PARA AS ROTAS PRINCIPAIS ==========
 
-    def endpoint_processar(self, image_data):
+    def processar_imagem_seguranca(self, image_data):
         """
-        Endpoint /processar - Processa imagem e retorna detecções com coordenadas
+        ROTA /processar - Para análise periódica de segurança
+        Retorna identificações + descrição natural com IA generativa
         """
         try:
+            logger.info("🛡️ Processando imagem para segurança")
+            start_time = time.time()
+            
             frame = self._decode_image(image_data)
             deteccoes = self._obter_deteccoes_detalhadas(frame)
             
-            if not self.interpreter:
-                return {
-                    "sucesso": False,
-                    "error": "Interpreter não disponível",
-                    "timestamp": time.time()
+            # Extrair nomes das faces
+            faces_nomes = [face['name'] for face in deteccoes["faces"]]
+            
+            # Obter descrição natural usando IA generativa
+            descricao_natural = ""
+            if self.interpreter:
+                descricao_natural = self.interpreter.gerar_descricao_natural(
+                    objetos_detectados=deteccoes["objetos"],
+                    faces_nomes=faces_nomes
+                )
+            
+            processing_time = time.time() - start_time
+            
+            # Resposta com IA generativa para descrição natural
+            resposta = {
+                "sucesso": True,
+                "timestamp": time.time(),
+                "tempo_processamento": f"{processing_time:.2f}s",
+                "tipo": "analise_seguranca",
+                "descricao_natural": descricao_natural,
+                "resumo": {
+                    "total_objetos": len(deteccoes["objetos"]),
+                    "total_faces": len(deteccoes["faces"]),
+                    "faces_conhecidas": len([f for f in deteccoes["faces"] if f['name'] != 'Desconhecido']),
+                    "faces_desconhecidas": len([f for f in deteccoes["faces"] if f['name'] == 'Desconhecido'])
+                },
+                "alertas": self._gerar_alertas_seguranca(deteccoes),
+                "deteccoes": {
+                    "objetos": deteccoes["objetos"][:10],  # Limitar para performance
+                    "faces": deteccoes["faces"][:5]        # Limitar para performance
                 }
+            }
             
-            # Usar o novo método do interpreter
-            resultado = self.interpreter.processar_deteccoes(
-                objetos_detectados=deteccoes["objetos"],
-                faces_detectadas=deteccoes["faces"]
-            )
-            
-            return resultado
+            logger.info(f"✅ Segurança: {resposta['resumo']['total_objetos']} objetos, {resposta['resumo']['total_faces']} faces")
+            return resposta
             
         except Exception as e:
-            logger.error(f"❌ Erro endpoint_processar: {e}")
+            logger.error(f"❌ Erro processar_imagem_seguranca: {e}")
             return {
                 "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
 
-    def endpoint_perguntar(self, image_data, pergunta):
+    def perguntar_sobre_imagem(self, image_data, pergunta):
         """
-        Endpoint /perguntar - Responde pergunta com correlação com imagem
+        ROTA /perguntar - Para chat com IA sobre a imagem
+        Usa OpenAI para conversa contextual
         """
         try:
+            logger.info(f"💬 Processando pergunta: '{pergunta}'")
+            start_time = time.time()
+            
             frame = self._decode_image(image_data)
             deteccoes = self._obter_deteccoes_detalhadas(frame)
             
@@ -287,28 +319,36 @@ class OcchioCloud:
             # Extrair nomes das faces para o interpreter
             faces_nomes = [face['name'] for face in deteccoes["faces"]]
             
-            # Usar o novo método do interpreter
+            # Usar interpreter para resposta contextual
             resultado = self.interpreter.perguntar_sobre_imagem(
                 pergunta=pergunta,
                 objetos_detectados=deteccoes["objetos"],
                 faces_nomes=faces_nomes
             )
             
+            processing_time = time.time() - start_time
+            resultado["tempo_total"] = f"{processing_time:.2f}s"
+            
+            logger.info(f"✅ Pergunta respondida - Tempo: {processing_time:.2f}s")
             return resultado
             
         except Exception as e:
-            logger.error(f"❌ Erro endpoint_perguntar: {e}")
+            logger.error(f"❌ Erro perguntar_sobre_imagem: {e}")
             return {
                 "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
 
-    def endpoint_estatistica(self, image_data):
+    def obter_estatisticas_detalhadas(self, image_data):
         """
-        Endpoint /estatistica - Retorna estatísticas detalhadas
+        ROTA /estatistica - Para dados técnicos e logs
+        Retorna métricas detalhadas para análise
         """
         try:
+            logger.info("📊 Gerando estatísticas detalhadas")
+            start_time = time.time()
+            
             frame = self._decode_image(image_data)
             deteccoes = self._obter_deteccoes_detalhadas(frame)
             
@@ -319,56 +359,67 @@ class OcchioCloud:
                     "timestamp": time.time()
                 }
             
-            # Usar o novo método do interpreter
+            # Usar interpreter para estatísticas detalhadas
             resultado = self.interpreter.obter_estatisticas(
                 objetos_detectados=deteccoes["objetos"],
                 faces_detectadas=deteccoes["faces"]
             )
             
+            processing_time = time.time() - start_time
+            resultado["tempo_total"] = f"{processing_time:.2f}s"
+            resultado["timestamp"] = time.time()
+            
+            # Adicionar métricas do sistema
+            resultado["metricas_sistema"] = {
+                "memoria_utilizada": f"{self._obter_uso_memoria()} MB",
+                "tempo_resposta": f"{processing_time:.3f}s",
+                "qualidade_imagem": f"{frame.shape[1]}x{frame.shape[0]}"
+            }
+            
+            logger.info(f"✅ Estatísticas geradas - {resultado['contagens']['total_objetos']} objetos")
             return resultado
             
         except Exception as e:
-            logger.error(f"❌ Erro endpoint_estatistica: {e}")
+            logger.error(f"❌ Erro obter_estatisticas_detalhadas: {e}")
             return {
                 "sucesso": False,
                 "error": str(e),
                 "timestamp": time.time()
             }
 
-    def endpoint_completo(self, image_data, pergunta=None):
-        """
-        Endpoint /completo - Junta todos os processamentos
-        """
+    def _gerar_alertas_seguranca(self, deteccoes):
+        """Gera alertas de segurança baseados nas detecções"""
+        alertas = []
+        
+        # Alertas baseados em faces desconhecidas
+        faces_desconhecidas = [f for f in deteccoes["faces"] if f['name'] == 'Desconhecido']
+        if faces_desconhecidas:
+            alertas.append({
+                "tipo": "face_desconhecida",
+                "nivel": "medio",
+                "mensagem": f"{len(faces_desconhecidas)} face(s) desconhecida(s) detectada(s)",
+                "quantidade": len(faces_desconhecidas)
+            })
+        
+        # Alertas baseados em muitos objetos
+        if len(deteccoes["objetos"]) > 20:
+            alertas.append({
+                "tipo": "muitos_objetos",
+                "nivel": "baixo", 
+                "mensagem": "Muitos objetos detectados no ambiente",
+                "quantidade": len(deteccoes["objetos"])
+            })
+        
+        return alertas
+
+    def _obter_uso_memoria(self):
+        """Obtém uso de memória aproximado"""
         try:
-            frame = self._decode_image(image_data)
-            deteccoes = self._obter_deteccoes_detalhadas(frame)
-            
-            if not self.interpreter:
-                return {
-                    "sucesso": False,
-                    "error": "Interpreter não disponível",
-                    "timestamp": time.time()
-                }
-            
-            # Extrair nomes das faces
-            faces_nomes = [face['name'] for face in deteccoes["faces"]]
-            
-            # Usar o novo método do interpreter
-            resultado = self.interpreter.processamento_completo(
-                objetos_detectados=deteccoes["objetos"],
-                faces_detectadas=deteccoes["faces"],
-                pergunta=pergunta
-            )
-            
-            return resultado
-            
-        except Exception as e:
-            logger.error(f"❌ Erro endpoint_completo: {e}")
-            return {
-                "sucesso": False,
-                "error": str(e),
-                "timestamp": time.time()
-            }
+            import psutil
+            process = psutil.Process()
+            return f"{process.memory_info().rss / 1024 / 1024:.1f}"
+        except:
+            return "N/A"
 
     def obter_estatisticas_sistema(self):
         """Retorna estatísticas do sistema"""
@@ -418,184 +469,6 @@ def initialize_occhio():
         get_occhio_instance()
     except Exception as e:
         logger.error(f"❌ Erro na inicialização: {e}")
-
-# ================== ENDPOINTS PRINCIPAIS ==================
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check simples"""
-    return jsonify({
-        "service": "Occhio Cloud",
-        "status": "healthy", 
-        "timestamp": time.time()
-    })
-
-@app.route('/health-completo', methods=['GET'])
-def health_completo():
-    """Health check completo do sistema"""
-    try:
-        occhio = get_occhio_instance()
-        resultado = occhio.obter_estatisticas_sistema()
-        return jsonify(resultado)
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "status": "unhealthy"
-        }), 500
-
-@app.route('/ready', methods=['GET'])
-def ready_check():
-    """Endpoint de readiness"""
-    global _occhio_instance
-    if _occhio_instance is not None:
-        return jsonify({"status": "ready", "initialized": True})
-    else:
-        return jsonify({"status": "initializing", "initialized": False}), 503
-
-# ================== ENDPOINTS CORRIGIDOS ==================
-
-@app.route('/processar', methods=['POST'])
-def processar():
-    """
-    Endpoint /processar - Processa imagem e retorna detecções com coordenadas
-    REQUER: apenas imagem
-    """
-    try:
-        occhio = get_occhio_instance()
-        
-        if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
-        
-        if 'image' in request.files:
-            image_data = request.files['image'].read()
-        else:
-            image_data = request.json['image_data']
-        
-        logger.info("🔄 Processando imagem para endpoint /processar")
-        resultado = occhio.endpoint_processar(image_data)
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /processar: {e}")
-        return jsonify({"sucesso": False, "error": str(e)}), 500
-
-@app.route('/perguntar', methods=['POST'])
-def perguntar():
-    """
-    Endpoint /perguntar - Responde pergunta com correlação com imagem
-    REQUER: imagem + pergunta
-    """
-    try:
-        occhio = get_occhio_instance()
-        
-        data = request.json
-        if 'pergunta' not in data:
-            return jsonify({"sucesso": False, "error": "Pergunta não fornecida"}), 400
-        
-        pergunta = data['pergunta']
-        image_data = data.get('image_data')
-        
-        if not image_data:
-            return jsonify({"sucesso": False, "error": "Forneça image_data"}), 400
-        
-        logger.info(f"❓ Nova pergunta: '{pergunta}'")
-        resultado = occhio.endpoint_perguntar(image_data, pergunta)
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /perguntar: {e}")
-        return jsonify({"sucesso": False, "error": str(e)}), 500
-
-@app.route('/estatistica', methods=['POST'])
-def estatistica():
-    """
-    Endpoint /estatistica - Retorna estatísticas detalhadas da imagem
-    REQUER: apenas imagem
-    """
-    try:
-        occhio = get_occhio_instance()
-        
-        if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
-        
-        if 'image' in request.files:
-            image_data = request.files['image'].read()
-        else:
-            image_data = request.json['image_data']
-        
-        logger.info("📊 Gerando estatísticas para endpoint /estatistica")
-        resultado = occhio.endpoint_estatistica(image_data)
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /estatistica: {e}")
-        return jsonify({"sucesso": False, "error": str(e)}), 500
-
-@app.route('/completo', methods=['POST'])
-def completo():
-    """
-    Endpoint /completo - Junta todos os processamentos
-    REQUER: imagem (obrigatória) + pergunta (opcional)
-    """
-    try:
-        occhio = get_occhio_instance()
-        
-        if 'image' not in request.files and 'image_data' not in request.json:
-            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
-        
-        # Obter dados - IMAGEM É OBRIGATÓRIA, PERGUNTA É OPCIONAL
-        if 'image' in request.files:
-            image_data = request.files['image'].read()
-        else:
-            image_data = request.json['image_data']
-        
-        # PERGUNTA É OPCIONAL - se não tiver, usar None
-        pergunta = request.json.get('pergunta')  # get() em vez de ['pergunta']
-        
-        logger.info(f"🎯 Endpoint COMPLETO - Pergunta: {pergunta if pergunta else 'Nenhuma (apenas análise)'}")
-        
-        resultado = occhio.endpoint_completo(image_data, pergunta)
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /completo: {e}")
-        return jsonify({"sucesso": False, "error": str(e)}), 500
-
-@app.route('/estatisticas-sistema', methods=['GET'])
-def estatisticas_sistema():
-    """
-    Retorna estatísticas do sistema (legado - mantido para compatibilidade)
-    """
-    try:
-        occhio = get_occhio_instance()
-        resultado = occhio.obter_estatisticas_sistema()
-        return jsonify(resultado)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /estatisticas-sistema: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# ================== ENDPOINTS DE COMPATIBILIDADE (opcionais) ==================
-
-@app.route('/analise-rapida', methods=['POST'])
-def analise_rapida():
-    """Endpoint legado para compatibilidade"""
-    try:
-        # Redirecionar para /perguntar com pergunta padrão
-        data = request.json if request.json else {}
-        if 'image_data' not in data:
-            return jsonify({"sucesso": False, "error": "Nenhuma imagem fornecida"}), 400
-        
-        data['pergunta'] = "Descreva o que você vê nesta imagem"
-        
-        # Criar uma requisição fake para o endpoint perguntar
-        request._cached_json = data
-        return perguntar()
-            
-    except Exception as e:
-        logger.error(f"❌ Erro endpoint /analise-rapida: {e}")
-        return jsonify({"sucesso": False, "error": str(e)}), 500
 
 def iniciar_servidor():
     """Inicia o servidor para nuvem"""
