@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO FINAL ATUALIZADA com YOLO e análises inteligentes
+Interpreter - VERSÃO FINAL ATUALIZADA com classificação de perguntas melhorada
 """
 
 import logging
@@ -94,12 +94,12 @@ class Interpreter:
         if not self.client:
             return "Vou descrever o ambiente para você. Sou a Specula, sua assistente visual."
         
-        # Preparar dados REAIS do YOLO e faces
-        objetos_filtrados = self._filtrar_objetos_relevantes_yolo(objetos_detectados or [])
+        # Preparar dados REAIS
+        objetos_filtrados = self._filtrar_objetos_relevantes(
+            [obj.get('name', '') for obj in (objetos_detectados or [])]
+        )
         
-        # Obter contador de objetos detectados
-        contador_objetos = self._contar_objetos_yolo(objetos_filtrados)
-        
+        contador_objetos = Counter(objetos_filtrados)
         total_pessoas = len(faces_nomes or [])
         faces_conhecidas = [nome for nome in (faces_nomes or []) if nome != 'Desconhecido']
         
@@ -108,7 +108,7 @@ class Interpreter:
             return "Olha, parece um ambiente bem simples ou vazio. Não estou identificando muitos objetos ou pessoas. Sou a Specula, sua assistente!"
         
         # Construir contexto APENAS com o que foi realmente detectado
-        contexto_real = self._construir_contexto_real_yolo(contador_objetos, total_pessoas, faces_conhecidas)
+        contexto_real = self._construir_contexto_real(contador_objetos, total_pessoas, faces_conhecidas)
         
         try:
             messages = [
@@ -160,7 +160,7 @@ class Interpreter:
                 
         except Exception as e:
             logger.error(f"❌ Erro ao gerar descrição natural: {e}")
-            return self._gerar_descricao_precisa_yolo(contador_objetos, total_pessoas, faces_conhecidas)
+            return self._gerar_descricao_precisa(contador_objetos, total_pessoas, faces_conhecidas)
 
     # ========== MÉTODO PRINCIPAL PARA /perguntar ==========
 
@@ -172,13 +172,14 @@ class Interpreter:
         
         start_time = time.time()
         
-        # Primeiro verificar se é pergunta sobre tempo/data
+        # Primeiro verificar se é pergunta sobre tempo/data - AGORA ANTES DE CLASSIFICAR
         resposta_tempo = self._verificar_pergunta_tempo(pergunta)
         if resposta_tempo:
+            processing_time = time.time() - start_time
             return {
                 'sucesso': True,
                 'timestamp': time.time(),
-                'tempo_processamento': f"{time.time() - start_time:.2f}s",
+                'tempo_processamento': f"{processing_time:.2f}s",
                 'pergunta': pergunta,
                 'resposta': resposta_tempo,
                 'tipo_pergunta': "geral",
@@ -186,18 +187,20 @@ class Interpreter:
                 'dados_utilizados': "Pergunta geral (tempo/data)"
             }
         
-        # Classificar o tipo de pergunta
-        tipo_pergunta = self._classificar_tipo_pergunta(pergunta)
+        # Classificar o tipo de pergunta - VERSÃO MELHORADA
+        tipo_pergunta = self._classificar_tipo_pergunta_melhorada(pergunta)
         logger.info(f"🔍 Pergunta classificada como: {tipo_pergunta}")
         
         if tipo_pergunta == "sobre_imagem":
             # Pergunta sobre a imagem - usar dados detectados
-            resposta = self._responder_sobre_imagem_yolo(pergunta, objetos_detectados, faces_nomes)
+            resposta = self._responder_sobre_imagem_corrigida(pergunta, objetos_detectados, faces_nomes)
             correlacao = True
+            dados_utilizados = self._formatar_dados_utilizados(objetos_detectados, faces_nomes)
         else:
             # Pergunta geral - responder de forma natural
             resposta = self._responder_pergunta_geral_corrigida(pergunta)
             correlacao = False
+            dados_utilizados = "Pergunta geral"
         
         processing_time = time.time() - start_time
         
@@ -209,8 +212,165 @@ class Interpreter:
             'resposta': resposta,
             'tipo_pergunta': tipo_pergunta,
             'correlacao_com_imagem': correlacao,
-            'dados_utilizados': self._formatar_dados_utilizados_yolo(objetos_detectados, faces_nomes) if correlacao else "Pergunta geral"
+            'dados_utilizados': dados_utilizados
         }
+
+    # ========== CLASSIFICAÇÃO DE PERGUNTAS MELHORADA ==========
+
+    def _classificar_tipo_pergunta_melhorada(self, pergunta):
+        """Classifica se a pergunta é sobre a imagem ou geral - VERSÃO MELHORADA"""
+        pergunta_lower = pergunta.lower().strip()
+        
+        # Lista de perguntas claramente GERAIS que NÃO são sobre imagem
+        perguntas_gerais_absolutas = [
+            # Perguntas existenciais/conceituais
+            'o que é ', 'oque é ', 'qual é ', 'quem foi ', 'quem é ',
+            'história de ', 'significado de ', 'definição de ',
+            'explique ', 'explicar ', 'conceito de ',
+            
+            # Informações gerais
+            'capital de ', 'população de ', 'onde fica ',
+            'quantos habitantes ', 'qual a população ',
+            
+            # Piadas e filosofia
+            'conta uma piada', 'piada sobre', 'piada do',
+            'qual o sentido da vida', 'filosofia',
+            
+            # Perguntas sobre o assistente
+            'como você está', 'tudo bem', 'como vai',
+            'quem é você', 'qual seu nome', 'o que você faz',
+            'qual sua função', 'você é ', 'é uma ia', 'é um robô',
+            'como trabalha', 'como funciona',
+            
+            # Agradecimentos
+            'obrigado', 'valeu', 'agradeço', 'thanks',
+            
+            # Cumprimentos
+            'oi', 'olá', 'bom dia', 'boa tarde', 'boa noite',
+            'hello', 'hi', 'hey',
+            
+            # Perguntas sobre condições físicas/meteorológicas
+            'qual a temperatura', 'temperatura atual', 'faz calor',
+            'está frio', 'como está o tempo', 'previsão do tempo',
+            'está chovendo', 'faz sol',
+            
+            # Perguntas sobre localização
+            'onde estamos', 'qual cidade', 'onde fica',
+            'em que lugar', 'localização', 'em qual cidade',
+            'em qual estado', 'em qual país',
+            
+            # Ano/Data
+            'que ano é', 'em que ano', 'qual o ano',
+            
+            # Perguntas com definições claras
+            'batata', 'abacaxi', 'computador', 'carro', 'casa',
+            'animais', 'planetas', 'universo',
+            
+            # Perguntas que pedem explicações
+            'como funciona', 'para que serve', 'para que é usado',
+            
+            # Perguntas sobre sentimentos/emoções
+            'como está se sentindo', 'está feliz', 'está triste',
+            'como você se sente'
+        ]
+        
+        # Verificar se é pergunta geral absoluta
+        for padrao in perguntas_gerais_absolutas:
+            if padrao in pergunta_lower:
+                return "geral"
+        
+        # Lista de perguntas claramente sobre IMAGEM
+        perguntas_imagem_absolutas = [
+            # Pronomes demonstrativos + palavras imagem/foto
+            'essa imagem', 'esta foto', 'na foto', 'na imagem',
+            'nesta imagem', 'nesta foto', 'dessa imagem', 'dessa foto',
+            
+            # Perguntas sobre visão/detecção
+            'o que você vê', 'o que está vendo', 'o que consegue ver',
+            'o que identifica', 'o que reconhece', 'o que detecta',
+            'está vendo', 'consegue ver', 'pode ver',
+            
+            # Perguntas com "tem" que claramente se referem à imagem
+            'tem na imagem', 'tem na foto', 'tem aí', 'tem ali',
+            'tem aqui', 'tem nessa', 'tem nessa imagem',
+            
+            # Perguntas específicas sobre conteúdo visual
+            'quem está na', 'onde está na', 'quantos tem na',
+            'quantas tem na', 'qual a cor do', 'qual a cor da',
+            
+            # Descrever/analisar imagem
+            'descreva a imagem', 'descreva a foto', 'analise a imagem',
+            'analise a foto', 'descreva o que vê', 'descreva o ambiente',
+            
+            # Perguntas sobre ambiente específico
+            'é interno ou externo', 'está dentro ou fora',
+            'parece ser interno', 'parece ser externo'
+        ]
+        
+        # Verificar se é pergunta sobre imagem absoluta
+        for padrao in perguntas_imagem_absolutas:
+            if padrao in pergunta_lower:
+                return "sobre_imagem"
+        
+        # Palavras-chave para imagem (mas não absolutas)
+        palavras_imagem = [
+            'tem ', 'há ', 'vejo', 'vê',
+            'pessoa', 'pessoas', 'gente', 'alguém',
+            'objeto', 'objetos', 'coisa', 'coisas',
+            'ambiente', 'lugar', 'sala', 'quarto', 'cozinha',
+            'cadeira', 'mesa', 'sofá', 'cama', 'computador',
+            'tv', 'televisão', 'celular', 'planta', 'árvore',
+            'animal', 'cachorro', 'gato', 'carro', 'livro'
+        ]
+        
+        # Palavras-chave para perguntas gerais (mas não absolutas)
+        palavras_gerais = [
+            '?',  # Perguntas curtas sem contexto específico
+            'por que', 'como', 'quando', 'onde', 'quem',
+            'qual a', 'quais os', 'quais as'
+        ]
+        
+        # Se é uma pergunta muito curta (1-4 palavras) sem contexto de imagem, é geral
+        palavras = pergunta_lower.split()
+        if len(palavras) <= 4:
+            tem_palavra_imagem = any(palavra in pergunta_lower for palavra in palavras_imagem)
+            tem_palavra_geral = any(palavra in pergunta_lower for palavra in palavras_gerais)
+            
+            if not tem_palavra_imagem and tem_palavra_geral:
+                return "geral"
+        
+        # Se tem palavras específicas de imagem e não é claramente geral
+        for palavra in palavras_imagem:
+            if palavra in pergunta_lower:
+                # Verificar se não é um falso positivo
+                if not self._e_falso_positivo_imagem(pergunta_lower, palavra):
+                    return "sobre_imagem"
+        
+        # Se chegou aqui, é difícil determinar - padrão: perguntas com ? são sobre imagem
+        if '?' in pergunta:
+            return "sobre_imagem"
+        
+        # Default para geral
+        return "geral"
+    
+    def _e_falso_positivo_imagem(self, pergunta_lower, palavra_imagem):
+        """Verifica se uma palavra de imagem é um falso positivo"""
+        # Palavras que podem aparecer em perguntas gerais
+        falsos_positivos = {
+            'tem': ['tem perigo', 'tem problema', 'tem alguma dica', 'tem como'],
+            'pessoa': ['pessoa famosa', 'pessoa importante'],
+            'objeto': ['objeto de estudo', 'objeto histórico'],
+            'ambiente': ['ambiente de trabalho', 'ambiente escolar'],
+            'lugar': ['lugar turístico', 'lugar histórico'],
+            'animal': ['animal em extinção', 'animal selvagem']
+        }
+        
+        if palavra_imagem in falsos_positivos:
+            for falso_positivo in falsos_positivos[palavra_imagem]:
+                if falso_positivo in pergunta_lower:
+                    return True
+        
+        return False
 
     # ========== MÉTODO PARA VERIFICAR PERGUNTAS DE TEMPO ==========
 
@@ -298,39 +458,46 @@ class Interpreter:
         
         return None
 
-    # ========== MÉTODO ATUALIZADO PARA YOLO ==========
+    # ========== MÉTODO CORRIGIDO PARA RESPONDER SOBRE IMAGEM ==========
 
-    def _responder_sobre_imagem_yolo(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Responde de forma CORRIGIDA, com artigos certos e análises apropriadas usando dados do YOLO"""
-        # Preparar dados REAIS do YOLO
-        objetos_filtrados = self._filtrar_objetos_relevantes_yolo(objetos_detectados or [])
+    def _responder_sobre_imagem_corrigida(self, pergunta, objetos_detectados=None, faces_nomes=None):
+        """Responde de forma CORRIGIDA, com artigos certos e análises apropriadas"""
+        # Preparar dados REAIS
+        objetos_filtrados = []
+        if objetos_detectados:
+            for obj in objetos_detectados:
+                nome = obj.get('name', '')
+                count = obj.get('count', 1)
+                for _ in range(count):
+                    objetos_filtrados.append(nome)
         
-        # Obter contador de objetos detectados
-        contador_objetos = self._contar_objetos_yolo(objetos_filtrados)
-        
+        contador_objetos = Counter(objetos_filtrados)
         total_pessoas = len(faces_nomes or [])
         faces_conhecidas = [nome for nome in (faces_nomes or []) if nome != 'Desconhecido']
         
         # DEBUG: Mostrar o que foi realmente detectado
-        logger.info(f"📊 Dados YOLO detectados: {dict(contador_objetos)}, Pessoas: {total_pessoas}, Faces conhecidas: {faces_conhecidas}")
+        logger.info(f"📊 Dados reais detectados: {dict(contador_objetos)}, Pessoas: {total_pessoas}, Faces conhecidas: {faces_conhecidas}")
         
         # Se temos OpenAI, usar para resposta corrigida
         if self.client:
-            return self._responder_com_ia_corrigida_yolo(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_com_ia_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
         else:
-            return self._responder_base_corrigida_yolo(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_base_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
 
-    def _responder_com_ia_corrigida_yolo(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
+    def _responder_com_ia_corrigida(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
         """Resposta corrigida usando IA - com artigos corretos e análises"""
         try:
             # Construir lista PRECISA do que foi detectado
-            dados_reais = self._construir_dados_reais_precisos_yolo(contador_objetos, total_pessoas, faces_conhecidas)
+            dados_reais = self._construir_dados_reais_precisos(contador_objetos, total_pessoas, faces_conhecidas)
             
             # Analisar o tipo de ambiente baseado nos objetos
-            analise_ambiente = self._analisar_tipo_ambiente_yolo(contador_objetos)
+            analise_ambiente = self._analisar_tipo_ambiente(contador_objetos)
             
             # Preparar contexto sobre artigos para ajudar a IA
-            artigos_contexto = self._preparar_contexto_artigos_yolo(contador_objetos)
+            artigos_contexto = self._preparar_contexto_artigos(contador_objetos)
+            
+            # Adicionar instruções específicas para diferentes tipos de perguntas
+            instrucoes_especificas = self._obter_instrucoes_para_pergunta(pergunta)
             
             messages = [
                 {
@@ -345,6 +512,9 @@ class Interpreter:
                     
                     INFORMAÇÕES SOBRE ARTIGOS (USE CORRETAMENTE):
                     {artigos_contexto}
+                    
+                    INSTRUÇÕES ESPECÍFICAS PARA ESTA PERGUNTA:
+                    {instrucoes_especificas}
 
                     REGRAS IMPORTANTES:
                     1. Use artigos corretos: "uma bola", "um sofá", "uma pessoa"
@@ -386,9 +556,30 @@ class Interpreter:
             
         except Exception as e:
             logger.error(f"❌ Erro ao responder com IA: {e}")
-            return self._responder_base_corrigida_yolo(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+            return self._responder_base_corrigida(pergunta, contador_objetos, total_pessoas, faces_conhecidas)
+    
+    def _obter_instrucoes_para_pergunta(self, pergunta):
+        """Retorna instruções específicas baseadas no tipo de pergunta"""
+        pergunta_lower = pergunta.lower()
+        
+        if 'quantas pessoas' in pergunta_lower:
+            return "RESPONDA APENAS COM O NÚMERO DE PESSOAS. Exemplo: 'Tem 2 pessoas.' ou 'Não tem pessoas.'"
+        
+        elif 'descreva' in pergunta_lower or 'o que tem' in pergunta_lower:
+            return "DESCREVA TUDO o que foi detectado na lista acima. Liste todos os objetos e pessoas."
+        
+        elif 'interno' in pergunta_lower or 'externo' in pergunta_lower:
+            return "USE A ANÁLISE DO AMBIENTE fornecida acima para responder se é interno ou externo."
+        
+        elif 'tem ' in pergunta_lower and ('?' in pergunta or pergunta_lower.endswith('?')):
+            # Extrair objeto da pergunta
+            objeto_pergunta = self._extrair_objeto_da_pergunta(pergunta_lower)
+            if objeto_pergunta:
+                return f"VERIFIQUE SE '{objeto_pergunta}' ESTÁ NA LISTA DE OBJETOS DETECTADOS. Se sim, diga 'Sim, tem...'. Se não, diga 'Não, não tem...'."
+        
+        return "Responda baseado apenas nos dados detectados acima."
 
-    def _preparar_contexto_artigos_yolo(self, contador_objetos):
+    def _preparar_contexto_artigos(self, contador_objetos):
         """Prepara contexto sobre artigos para ajudar a IA"""
         artigos = []
         
@@ -449,8 +640,8 @@ class Interpreter:
         
         return resposta_corrigida
 
-    def _analisar_tipo_ambiente_yolo(self, contador_objetos):
-        """Analisa o tipo de ambiente baseado nos objetos detectados pelo YOLO"""
+    def _analisar_tipo_ambiente(self, contador_objetos):
+        """Analisa o tipo de ambiente baseado nos objetos detectados"""
         objetos_detectados = list(contador_objetos.keys())
         
         # Objetos típicos de ambientes internos
@@ -478,11 +669,11 @@ class Interpreter:
         else:
             return "ANÁLISE: Difícil determinar se é interno ou externo apenas pelos objetos detectados."
 
-    def _construir_dados_reais_precisos_yolo(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Constrói lista precisa do que foi realmente detectado pelo YOLO"""
+    def _construir_dados_reais_precisos(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Constrói lista precisa do que foi realmente detectado"""
         partes = []
         
-        # Pessoas do YOLO
+        # Pessoas
         pessoas_yolo = contador_objetos.get('person', 0)
         total_detectado = max(total_pessoas, pessoas_yolo)
         
@@ -495,7 +686,7 @@ class Interpreter:
                 else:
                     partes.append(f"Pessoas: {total_detectado} pessoas")
         
-        # Objetos detectados pelo YOLO (traduzidos)
+        # Objetos detectados (traduzidos)
         outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
         if outros_objetos:
             objetos_traduzidos = []
@@ -513,21 +704,24 @@ class Interpreter:
         
         return " | ".join(partes)
 
-    def _responder_base_corrigida_yolo(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
+    def _responder_base_corrigida(self, pergunta, contador_objetos, total_pessoas, faces_conhecidas):
         """Resposta base corrigida - com artigos corretos e análises apropriadas"""
         pergunta_lower = pergunta.lower()
         
-        # Dados reais do YOLO
+        # Dados reais
         pessoas_yolo = contador_objetos.get('person', 0)
         total_pessoas_reais = max(total_pessoas, pessoas_yolo)
         objetos_reais = {k: v for k, v in contador_objetos.items() if k != 'person'}
         
-        # Lista de objetos detectados pelo YOLO (em português)
+        # Lista de objetos detectados (em português)
         objetos_pt = {self._traduzir_objeto(obj): qtd for obj, qtd in objetos_reais.items()}
         
         # PERGUNTA: "O que tem nessa imagem?" ou "Descreva o ambiente"
-        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'o que você vê']):
-            return self._descrever_ambiente_com_artigos_corretos(total_pessoas_reais, faces_conhecidas, objetos_pt)
+        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'o que você vê', 'descreva o ambiente', 'o que tem na imagem']):
+            if total_pessoas_reais > 0 or objetos_pt:
+                return self._descrever_ambiente_com_artigos_corretos(total_pessoas_reais, faces_conhecidas, objetos_pt)
+            else:
+                return "Não estou identificando elementos específicos nesta imagem. Sou a Specula, sua assistente visual!"
         
         # PERGUNTA: "Quantas pessoas você vê?"
         elif 'quantas pessoas' in pergunta_lower:
@@ -538,8 +732,8 @@ class Interpreter:
             return self._listar_objetos_com_artigos(objetos_pt)
         
         # PERGUNTA: "Esta foto parece ser interna ou externa?"
-        elif any(palavra in pergunta_lower for palavra in ['interno', 'externo', 'dentro', 'fora']):
-            return self._analisar_interno_externo_inteligente_yolo(contador_objetos)
+        elif any(palavra in pergunta_lower for palavra in ['interno', 'externo', 'dentro', 'fora', 'é interno']):
+            return self._analisar_interno_externo_inteligente(contador_objetos)
         
         # PERGUNTA sobre objetos específicos
         for objeto_pergunta in ['cadeira', 'sofá', 'mesa', 'cama', 'computador', 'tv', 'televisão', 
@@ -569,7 +763,7 @@ class Interpreter:
         if 'esport' in pergunta_lower:
             return self._verificar_categoria_com_artigo(['bola', 'tenis', 'frisbee', 'neve'], objetos_pt, 'itens esportivos')
         
-        # Resposta genérica
+        # Resposta genérica para perguntas sobre imagem não específicas
         if total_pessoas_reais > 0:
             return f"Vejo {total_pessoas_reais} pessoa{'s' if total_pessoas_reais > 1 else ''}."
         elif objetos_pt:
@@ -583,7 +777,25 @@ class Interpreter:
             else:
                 return f"Vejo {qtd} {obj_nome}s."
         else:
-            return "Não estou identificando muitos detalhes no ambiente."
+            return "Não estou identificando muitos detalhes no ambiente. Sou a Specula, sua assistente visual!"
+
+    def _extrair_objeto_da_pergunta(self, pergunta_lower):
+        """Extrai objeto mencionado na pergunta"""
+        # Padrões comuns
+        padroes = [
+            r'tem\s+(\w+)',
+            r'ha\s+(\w+)',
+            r'v[êe]\s+(\w+)',
+            r'identifica\s+(\w+)',
+            r'reconhece\s+(\w+)'
+        ]
+        
+        for padrao in padroes:
+            match = re.search(padrao, pergunta_lower)
+            if match:
+                return match.group(1)
+        
+        return None
 
     def _descrever_ambiente_com_artigos_corretos(self, total_pessoas, faces_conhecidas, objetos_pt):
         """Descreve o ambiente com artigos gramaticais corretos"""
@@ -661,8 +873,8 @@ class Interpreter:
         else:
             return "Não estou vendo objetos específicos."
 
-    def _analisar_interno_externo_inteligente_yolo(self, contador_objetos):
-        """Analisa se é interno ou externo de forma mais inteligente baseado nos dados do YOLO"""
+    def _analisar_interno_externo_inteligente(self, contador_objetos):
+        """Analisa se é interno ou externo de forma mais inteligente"""
         objetos_detectados = list(contador_objetos.keys())
         
         # Se tem bola e pessoas, provavelmente é externo (esportes)
@@ -775,6 +987,17 @@ class Interpreter:
         if any(palavra in pergunta_lower for palavra in ['você é real', 'é uma ia', 'é um robô']):
             return "Sou uma inteligência artificial criada especialmente para ajudar pessoas com deficiência visual. Mas gosto de pensar que sou uma amiga digital que está aqui para te apoiar! 🤖💖"
         
+        # Perguntas sobre definições/conceitos
+        if 'oque é' in pergunta_lower or 'o que é' in pergunta_lower or 'qual é' in pergunta_lower:
+            # Extrair o conceito perguntado
+            conceito = self._extrair_conceito_da_pergunta(pergunta_lower)
+            if conceito:
+                return self._responder_sobre_conceito(conceito)
+        
+        # Perguntas gerais sobre conhecimentos
+        if any(palavra in pergunta_lower for palavra in ['sabia que', 'voce sabe', 'você sabe', 'conhece']):
+            return "Como assistente, tenho conhecimento sobre muitos tópicos! Mas meu foco principal é ajudar com análise de imagens e descrição de ambientes. Tem alguma imagem para eu analisar?"
+        
         try:
             messages = [
                 {
@@ -824,7 +1047,46 @@ class Interpreter:
             logger.error(f"❌ Erro ao responder pergunta geral: {e}")
             return "Ops, tive um probleminha técnico. Sou a Specula, podemos tentar de novo ou você pode me enviar uma imagem para eu analisar?"
 
-    # ========== MÉTODOS AUXILIARES ATUALIZADOS PARA YOLO ==========
+    def _extrair_conceito_da_pergunta(self, pergunta_lower):
+        """Extrai o conceito perguntado em 'o que é X'"""
+        padroes = [
+            r'o que é\s+(\w+)',
+            r'oque é\s+(\w+)',
+            r'qual é\s+(\w+)',
+            r'quem é\s+(\w+)'
+        ]
+        
+        for padrao in padroes:
+            match = re.search(padrao, pergunta_lower)
+            if match:
+                return match.group(1)
+        
+        return None
+
+    def _responder_sobre_conceito(self, conceito):
+        """Responde sobre conceitos gerais"""
+        respostas_conhecidas = {
+            'batata': "🍠 A batata é um tubérculo comestível, originário da América do Sul. É um alimento básico em muitas culturas e pode ser preparado de diversas formas: cozida, frita, assada ou purê. Rico em carboidratos, vitaminas e minerais!",
+            'computador': "💻 Um computador é uma máquina eletrônica que processa dados e executa instruções. Ele nos ajuda com trabalho, estudo, comunicação e entretenimento. Existem desktops, laptops, tablets e smartphones!",
+            'carro': "🚗 Um carro ou automóvel é um veículo motorizado com rodas, usado para transporte de pessoas. Existem muitos tipos: sedan, SUV, hatchback, elétricos... Eles nos ajudam a nos locomover com mais facilidade!",
+            'casa': "🏠 Uma casa é um lugar onde as pessoas vivem, um lar. É onde temos nossa família, descansamos e criamos memórias. Pode ser um apartamento, uma casa térrea, um sobrado... O importante é ser um lugar acolhedor!",
+            'livro': "📚 Um livro é uma coleção de páginas com texto e/ou imagens, que conta uma história, ensina algo ou documenta conhecimento. Pode ser de ficção, não-ficção, didático... Ler é uma forma maravilhosa de aprender e viajar sem sair do lugar!",
+            'amor': "❤️ Amor é um sentimento profundo de afeição, cuidado e conexão com alguém ou algo. Pode ser amor familiar, amor romântico, amor pela natureza... É uma das emoções mais bonitas que podemos sentir!",
+            'amizade': "🤝 Amizade é uma relação de afeto, confiança e apoio mútuo entre pessoas. Ter amigos é ter pessoas com quem compartilhar alegrias, tristezas e momentos especiais da vida!",
+            'felicidade': "😊 Felicidade é um estado de bem-estar, contentamento e satisfação com a vida. Pode vir das pequenas coisas: um abraço, uma conquista, um momento de paz... Cada pessoa encontra felicidade de formas diferentes!"
+        }
+        
+        conceito_lower = conceito.lower()
+        
+        # Verificar se temos uma resposta conhecida
+        for chave, resposta in respostas_conhecidas.items():
+            if chave in conceito_lower or conceito_lower in chave:
+                return resposta
+        
+        # Resposta genérica para conceitos não conhecidos
+        return f"Interessante! Você quer saber sobre '{conceito}'. Como assistente, posso te dizer que é um conceito interessante, mas meu conhecimento específico sobre isso é limitado. Posso te ajudar melhor analisando imagens do ambiente ao seu redor! Tem alguma foto para eu ver?"
+
+    # ========== MÉTODOS AUXILIARES ==========
 
     def _verificar_e_corrigir_invencoes(self, descricao, contador_objetos, total_pessoas, faces_conhecidas):
         """Verifica se a IA inventou algo e corrige"""
@@ -857,12 +1119,12 @@ class Interpreter:
         
         palavras_vazias = ['nada', 'vazio', 'não tem nada', 'sem nada', 'nenhum']
         if any(palavra in descricao_lower for palavra in palavras_vazias) and (total_detectado > 0 or objetos_reais_pt):
-            return self._gerar_descricao_precisa_yolo(contador_objetos, total_pessoas, faces_conhecidas)
+            return self._gerar_descricao_precisa(contador_objetos, total_pessoas, faces_conhecidas)
         
         return descricao
 
-    def _construir_contexto_real_yolo(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Constrói contexto apenas com dados reais do YOLO"""
+    def _construir_contexto_real(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Constrói contexto apenas com dados reais"""
         partes = []
         
         pessoas_yolo = contador_objetos.get('person', 0)
@@ -891,8 +1153,8 @@ class Interpreter:
         
         return " | ".join(partes)
 
-    def _gerar_descricao_precisa_yolo(self, contador_objetos, total_pessoas, faces_conhecidas):
-        """Gera descrição precisa baseada apenas nos dados do YOLO"""
+    def _gerar_descricao_precisa(self, contador_objetos, total_pessoas, faces_conhecidas):
+        """Gera descrição precisa baseada apenas nos dados"""
         partes = []
         
         pessoas_yolo = contador_objetos.get('person', 0)
@@ -933,53 +1195,11 @@ class Interpreter:
         else:
             return f"Tem {', '.join(partes[:-1])} e {partes[-1]}."
 
+    # MÉTODO ANTIGO DE CLASSIFICAÇÃO (mantido para compatibilidade)
     def _classificar_tipo_pergunta(self, pergunta):
         """Classifica se a pergunta é sobre a imagem ou geral"""
-        pergunta_lower = pergunta.lower().strip()
-        
-        palavras_imagem = [
-            'essa imagem', 'esta foto', 'na foto', 'na imagem',
-            'o que tem', 'quem está', 'onde está', 'tem ', 'há ',
-            'quantos', 'quantas', 'pessoa', 'pessoas',
-            'descreva', 'analise', 'identifique', 'reconhece',
-            'mostra', 'mostrar', 'o que você vê', 'que tem aí',
-            'ambiente', 'lugar', 'sala', 'quarto', 'cozinha',
-            'vejo', 'vê', 'consegue ver', 'está vendo',
-            'identifica', 'reconhece', 'há alguma', 'tem algum',
-            'objeto', 'objetos', 'coisa', 'coisas',
-            'quais', 'qual'
-        ]
-        
-        perguntas_gerais_claras = [
-            'o que é', 'como funciona', 'quem foi',
-            'história de', 'significado de', 'definição de',
-            'explique', 'explicar', 'conceito de',
-            'capital de', 'população de', 'onde fica',
-            'conta uma piada', 'qual o sentido da vida',
-            'que horas', 'que dia', 'data', 'horas são',
-            'como você está', 'quem é você', 'qual seu nome',
-            'obrigado', 'valeu', 'agradeço',
-            'oi', 'olá', 'bom dia', 'boa tarde', 'boa noite',
-            'tudo bem', 'como vai', 'hello', 'hi',
-            'qual sua função', 'o que você faz',
-            'como está o tempo', 'qual a temperatura',
-            'onde estamos', 'qual cidade', 'como vai ser',
-            'você é ia', 'é uma inteligência', 'como trabalha',
-            'você é real', 'é um robô'
-        ]
-        
-        for palavra in perguntas_gerais_claras:
-            if palavra in pergunta_lower:
-                return "geral"
-        
-        for palavra in palavras_imagem:
-            if palavra in pergunta_lower:
-                return "sobre_imagem"
-        
-        if '?' in pergunta and len(pergunta.split()) < 10:
-            return "sobre_imagem"
-        
-        return "geral"
+        # Usar a nova classificação melhorada
+        return self._classificar_tipo_pergunta_melhorada(pergunta)
 
     def _traduzir_objeto(self, objeto_ingles):
         """Traduz objeto do inglês para português"""
@@ -988,32 +1208,23 @@ class Interpreter:
                 return pt
         return objeto_ingles
 
-    def _filtrar_objetos_relevantes_yolo(self, objetos_detectados):
-        """Filtra apenas objetos que conhecemos dos dados do YOLO"""
+    def _filtrar_objetos_relevantes(self, objetos_detectados):
+        """Filtra apenas objetos que conhecemos"""
         objetos_filtrados = []
         todos_objetos = [obj for lista in self.objetos_conhecidos.values() for obj in lista]
         
         for obj in objetos_detectados:
-            if isinstance(obj, dict):
-                nome = obj.get('name', '')
-            else:
-                nome = str(obj)
-            
-            if nome.lower() in todos_objetos:
-                objetos_filtrados.append(nome)
+            if obj.lower() in todos_objetos:
+                objetos_filtrados.append(obj)
         
         return objetos_filtrados
 
-    def _contar_objetos_yolo(self, objetos_filtrados):
-        """Conta objetos detectados pelo YOLO"""
-        return Counter(objetos_filtrados)
-
-    def _formatar_dados_utilizados_yolo(self, objetos_detectados, faces_nomes):
+    def _formatar_dados_utilizados(self, objetos_detectados, faces_nomes):
         """Formata dados utilizados para resposta"""
         objetos_count = len(objetos_detectados or [])
         faces_count = len(faces_nomes or [])
         
-        return f"{objetos_count} objetos YOLO e {faces_count} pessoas analisadas"
+        return f"{objetos_count} objetos e {faces_count} pessoas analisadas"
 
     # ========== MÉTODO PARA /estatistica ==========
 
@@ -1025,15 +1236,15 @@ class Interpreter:
         
         start_time = time.time()
         
-        # Processar objetos detectados pelo YOLO
-        objetos_processados = self._processar_objetos_estatisticas_yolo(objetos_detectados)
+        # Processar objetos detectados
+        objetos_processados = self._processar_objetos_estatisticas(objetos_detectados)
         faces_processadas = self._processar_faces_estatisticas(faces_detectadas or [])
         
         # Calcular métricas de precisão
-        metricas_precisao = self._calcular_metricas_precisao_yolo(objetos_detectados, faces_detectadas)
+        metricas_precisao = self._calcular_metricas_precisao(objetos_detectados, faces_detectadas)
         
         # Gerar análise técnica
-        analise_tecnica = self._gerar_analise_tecnica_yolo(objetos_processados, faces_processadas)
+        analise_tecnica = self._gerar_analise_tecnica(objetos_processados, faces_processadas)
         
         processing_time = time.time() - start_time
         
@@ -1044,7 +1255,7 @@ class Interpreter:
             'contagens': {
                 'total_objetos': len(objetos_detectados),
                 'total_faces': len(faces_detectadas or []),
-                'objetos_por_categoria': self._agrupar_objetos_por_categoria_yolo(objetos_detectados),
+                'objetos_por_categoria': self._agrupar_objetos_por_categoria(objetos_detectados),
                 'faces_conhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') != 'Desconhecido']),
                 'faces_desconhecidas': len([f for f in (faces_detectadas or []) if f.get('name', 'Desconhecido') == 'Desconhecido'])
             },
@@ -1054,26 +1265,20 @@ class Interpreter:
                 'faces': faces_processadas
             },
             'analise_tecnica': analise_tecnica,
-            'logs_diagnostico': self._gerar_logs_diagnostico_yolo(objetos_detectados, faces_detectadas)
+            'logs_diagnostico': self._gerar_logs_diagnostico(objetos_detectados, faces_detectadas)
         }
 
-    # ========== MÉTODOS DE ESTATÍSTICAS ATUALIZADOS ==========
+    # ========== MÉTODOS DE ESTATÍSTICAS ==========
 
-    def _processar_objetos_estatisticas_yolo(self, objetos_detectados):
-        """Processa objetos do YOLO para estatísticas detalhadas"""
+    def _processar_objetos_estatisticas(self, objetos_detectados):
+        """Processa objetos para estatísticas detalhadas"""
         objetos_processados = []
         
         for i, obj in enumerate(objetos_detectados, 1):
-            if isinstance(obj, dict):
-                nome_ingles = obj.get('name', 'desconhecido')
-                confianca = obj.get('confidence', 0)
-                bbox = obj.get('bbox', {})
-                count = obj.get('count', 1)
-            else:
-                nome_ingles = str(obj)
-                confianca = 0.8  # Default para YOLO
-                bbox = {}
-                count = 1
+            nome_ingles = obj.get('name', 'desconhecido')
+            confianca = obj.get('confidence', 0)
+            bbox = obj.get('bbox', {})
+            count = obj.get('count', 1)
             
             objeto_info = {
                 'id': i,
@@ -1082,7 +1287,7 @@ class Interpreter:
                 'confianca': confianca,
                 'confianca_percentual': f"{confianca:.1%}",
                 'quantidade': count,
-                'categoria': self._classificar_categoria_yolo(nome_ingles),
+                'categoria': self._classificar_categoria(nome_ingles),
                 'coordenadas': bbox,
                 'area': bbox.get('width', 0) * bbox.get('height', 0) if bbox else 0,
                 'nivel_confianca': self._classificar_nivel_confianca(confianca)
@@ -1114,15 +1319,9 @@ class Interpreter:
         
         return faces_processadas
 
-    def _calcular_metricas_precisao_yolo(self, objetos_detectados, faces_detectadas):
-        """Calcula métricas de precisão detalhadas para YOLO"""
-        confiancas_objetos = []
-        for obj in objetos_detectados:
-            if isinstance(obj, dict):
-                confiancas_objetos.append(obj.get('confidence', 0))
-            else:
-                confiancas_objetos.append(0.8)  # Default para YOLO
-        
+    def _calcular_metricas_precisao(self, objetos_detectados, faces_detectadas):
+        """Calcula métricas de precisão detalhadas"""
+        confiancas_objetos = [obj.get('confidence', 0) for obj in objetos_detectados]
         confiancas_faces = [face.get('confidence', 0) for face in (faces_detectadas or [])]
         
         def calcular_media(lista):
@@ -1145,8 +1344,8 @@ class Interpreter:
             'objetos_baixa_confianca': len([c for c in confiancas_objetos if c < 0.3])
         }
 
-    def _gerar_analise_tecnica_yolo(self, objetos_processados, faces_processadas):
-        """Gera análise técnica dos dados do YOLO"""
+    def _gerar_analise_tecnica(self, objetos_processados, faces_processadas):
+        """Gera análise técnica dos dados"""
         total_objetos = len(objetos_processados)
         total_faces = len(faces_processadas)
         
@@ -1159,7 +1358,7 @@ class Interpreter:
             categorias = Counter([obj['categoria'] for obj in objetos_processados])
             categoria_principal = categorias.most_common(1)[0][0] if categorias else "diversos"
             total_itens = sum(obj.get('quantidade', 1) for obj in objetos_processados)
-            analise.append(f"{total_itens} itens detectados pelo YOLO ({total_objetos} tipos), predominância: {categoria_principal}")
+            analise.append(f"{total_itens} itens detectados ({total_objetos} tipos), predominância: {categoria_principal}")
         
         if total_faces > 0:
             faces_conhecidas = len([f for f in faces_processadas if f['tipo'] == 'conhecida'])
@@ -1170,25 +1369,20 @@ class Interpreter:
         
         return ". ".join(analise)
 
-    def _agrupar_objetos_por_categoria_yolo(self, objetos_detectados):
-        """Agrupa objetos do YOLO por categoria"""
+    def _agrupar_objetos_por_categoria(self, objetos_detectados):
+        """Agrupa objetos por categoria"""
         categorias = {}
         for obj in objetos_detectados:
-            if isinstance(obj, dict):
-                nome = obj.get('name', 'desconhecido')
-                count = obj.get('count', 1)
-            else:
-                nome = str(obj)
-                count = 1
-            
-            categoria = self._classificar_categoria_yolo(nome)
+            nome = obj.get('name', 'desconhecido')
+            count = obj.get('count', 1)
+            categoria = self._classificar_categoria(nome)
             if categoria not in categorias:
                 categorias[categoria] = 0
             categorias[categoria] += count
         return categorias
 
-    def _classificar_categoria_yolo(self, objeto_ingles):
-        """Classifica objeto do YOLO em categoria"""
+    def _classificar_categoria(self, objeto_ingles):
+        """Classifica objeto em categoria"""
         categorias = {
             'móveis': ['chair', 'couch', 'sofa', 'bed', 'table', 'dining table', 'desk', 'office chair'],
             'pessoas': ['person', 'people', 'human'],
@@ -1219,31 +1413,18 @@ class Interpreter:
         else:
             return "baixa"
 
-    def _gerar_logs_diagnostico_yolo(self, objetos_detectados, faces_detectadas):
-        """Gera logs para diagnóstico técnico do YOLO"""
+    def _gerar_logs_diagnostico(self, objetos_detectados, faces_detectadas):
+        """Gera logs para diagnóstico técnico"""
         logs = []
         
-        confiancas_obj = []
-        for obj in objetos_detectados:
-            if isinstance(obj, dict):
-                confiancas_obj.append(obj.get('confidence', 0))
-            else:
-                confiancas_obj.append(0.8)
-        
+        confiancas_obj = [obj.get('confidence', 0) for obj in objetos_detectados]
         if confiancas_obj:
             avg = sum(confiancas_obj)/len(confiancas_obj) if confiancas_obj else 0
-            logs.append(f"Confiança objetos YOLO: min={min(confiancas_obj):.2f}, max={max(confiancas_obj):.2f}, avg={avg:.2f}")
+            logs.append(f"Confiança objetos: min={min(confiancas_obj):.2f}, max={max(confiancas_obj):.2f}, avg={avg:.2f}")
         
-        tipos_objetos = Counter()
-        for obj in objetos_detectados:
-            if isinstance(obj, dict):
-                nome = obj.get('name', 'desconhecido')
-            else:
-                nome = str(obj)
-            tipos_objetos[nome] += 1
-        
+        tipos_objetos = Counter([obj.get('name', 'desconhecido') for obj in objetos_detectados])
         if tipos_objetos:
-            logs.append(f"Tipos objetos YOLO: {dict(tipos_objetos)}")
+            logs.append(f"Tipos objetos: {dict(tipos_objetos)}")
         
         if faces_detectadas:
             faces_conhecidas = len([f for f in faces_detectadas if f.get('name', 'Desconhecido') != 'Desconhecido'])
