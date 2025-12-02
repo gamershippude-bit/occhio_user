@@ -108,7 +108,21 @@ class OcchioCloud:
         try:
             from Detectors.yolo_detector import YOLODetector
             self.detector_objetos = YOLODetector()
-            logger.info("✅ YOLO inicializado")
+            
+            # Testar YOLO imediatamente
+            if self.detector_objetos:
+                logger.info("🧪 Testando YOLO com imagem de teste...")
+                test_frame = np.ones((480, 640, 3), dtype=np.uint8) * 128
+                cv2.rectangle(test_frame, (100, 100), (200, 300), (0, 0, 255), -1)
+                cv2.circle(test_frame, (400, 200), 50, (0, 255, 0), -1)
+                
+                if hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                    detections = self.detector_objetos.detectar_com_bbox(test_frame, confidence_threshold=0.01)
+                    logger.info(f"✅ YOLO testado - Detectou {len(detections)} objetos")
+                else:
+                    logger.info("✅ YOLO inicializado (método antigo)")
+            else:
+                logger.error("❌ YOLO não inicializado")
                 
         except Exception as e:
             logger.error(f"❌ Falha ao inicializar YOLO: {e}")
@@ -256,7 +270,7 @@ class OcchioCloud:
             raise
 
     def _obter_deteccoes_detalhadas(self, frame):
-        """Obtém detecções detalhadas com DEBUG"""
+        """Obtém detecções detalhadas - VERSÃO CORRIGIDA"""
         deteccoes = {
             "objetos": [],
             "faces": []
@@ -264,81 +278,85 @@ class OcchioCloud:
         
         logger.info(f"🔍 Processando frame: {frame.shape[1]}x{frame.shape[0]}")
         
-        # Detecção de objetos
+        # Detecção de objetos - CORREÇÃO AQUI
         if self.detector_objetos:
             try:
-                if hasattr(self.detector_objetos, 'detectar_objetos_yolo'):
-                    logger.info("🎯 Chamando detectar_objetos_yolo...")
+                # TENTAR O MÉTODO CORRETO: detectar_com_bbox
+                if hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                    logger.info("🎯 Chamando detectar_com_bbox...")
                     
-                    # TESTE COM MÚLTIPLOS THRESHOLDS
+                    # Testar múltiplos thresholds para garantir detecção
                     thresholds = [0.01, 0.1, 0.15, 0.25]
-                    objetos_detectados = []
-                    confiancas_detectadas = []
+                    all_detections = []
                     
                     for threshold in thresholds:
-                        objetos, confiancas = self.detector_objetos.detectar_objetos_yolo(frame, confidence_threshold=threshold)
-                        logger.info(f"   Threshold {threshold}: {len(objetos)} objetos")
+                        detections = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=threshold)
+                        logger.info(f"   Threshold {threshold}: {len(detections)} objetos")
                         
-                        if objetos:
-                            objetos_detectados = objetos
-                            confiancas_detectadas = confiancas
+                        if detections:
+                            all_detections = detections
                             break
                     
-                    # Usar o melhor resultado
-                    objetos = objetos_detectados
-                    confiancas = confiancas_detectadas
+                    # Se não detectou nada, tentar método mais baixo
+                    if not all_detections:
+                        logger.info("🔄 Nenhuma detecção, tentando threshold muito baixo...")
+                        all_detections = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=0.001)
                     
-                    logger.info(f"🔍 YOLO detectou {len(objetos)} objetos brutos")
+                    logger.info(f"🔍 YOLO detectou {len(all_detections)} objetos brutos")
                     
                     # DEBUG: Logar todos os objetos detectados
-                    for i, (obj, conf) in enumerate(zip(objetos, confiancas)):
-                        logger.info(f"   [{i+1}] {obj}: {conf:.3f}")
+                    for i, det in enumerate(all_detections[:10]):  # Limitar a 10 para log
+                        logger.info(f"   [{i+1}] {det['class']}: {det['confidence']:.3f} at ({det['bbox']['x']}, {det['bbox']['y']})")
                     
-                    # Agrupar objetos
-                    contador = {}
-                    for obj in objetos:
-                        contador[obj] = contador.get(obj, 0) + 1
+                    # Agrupar objetos por tipo
+                    objetos_agrupados = {}
+                    for det in all_detections:
+                        class_name = det['class']
+                        if class_name not in objetos_agrupados:
+                            objetos_agrupados[class_name] = {
+                                'name': class_name,
+                                'confidence': det['confidence'],
+                                'bbox': det['bbox'],
+                                'count': 0
+                            }
+                        objetos_agrupados[class_name]['count'] += 1
                     
-                    # Criar lista única
-                    for obj_name, count in contador.items():
-                        deteccoes["objetos"].append({
-                            'name': obj_name,
-                            'confidence': 0.7,
-                            'bbox': {'x': 0, 'y': 0, 'width': 100, 'height': 100},
-                            'count': count
-                        })
-                        logger.info(f"✅ Objeto agrupado: {obj_name} (x{count})")
+                    # Adicionar à lista de detecções
+                    for obj in objetos_agrupados.values():
+                        deteccoes["objetos"].append(obj)
+                        logger.info(f"✅ Objeto agrupado: {obj['name']} (x{obj['count']}) - conf: {obj['confidence']:.2f}")
                     
                     logger.info(f"📊 YOLO detectou {len(deteccoes['objetos'])} tipos de objetos")
                     
-                    # SE NÃO DETECTOU NADA, usar fallback
-                    if len(deteccoes["objetos"]) == 0:
-                        logger.warning("⚠️ YOLO não detectou objetos. Usando fallback...")
-                        # Fallback 1: Usar detector local
-                        objetos_local, confiancas_local = self._create_detector_local().detectar_objetos_yolo(frame)
-                        if objetos_local:
-                            for obj in objetos_local:
-                                deteccoes["objetos"].append({
-                                    'name': obj,
-                                    'confidence': 0.6,
-                                    'bbox': {'x': 100, 'y': 100, 'width': 50, 'height': 150},
-                                    'count': 1
-                                })
-                                logger.info(f"🔄 Fallback detectou: {obj}")
-                        else:
-                            # Fallback 2: Adicionar objeto padrão para teste
-                            deteccoes["objetos"].append({
-                                'name': 'person',
-                                'confidence': 0.5,
-                                'bbox': {'x': 100, 'y': 100, 'width': 50, 'height': 150},
-                                'count': 1
-                            })
-                            logger.info("🔄 Adicionado objeto padrão 'person' para teste")
+                # Fallback para método antigo
+                elif hasattr(self.detector_objetos, 'detectar_objetos_yolo'):
+                    logger.info("🔄 Usando método antigo detectar_objetos_yolo...")
+                    objetos, confiancas = self.detector_objetos.detectar_objetos_yolo(frame, confidence_threshold=0.15)
+                    
+                    for i, (obj, conf) in enumerate(zip(objetos, confiancas)):
+                        deteccoes["objetos"].append({
+                            'name': obj,
+                            'confidence': conf,
+                            'bbox': {'x': 100, 'y': 100, 'width': 50, 'height': 150},
+                            'count': 1
+                        })
+                        logger.info(f"   [{i+1}] {obj}: {conf:.3f}")
+                    
+                else:
+                    logger.warning("⚠️ Detector não tem métodos conhecidos")
                     
             except Exception as e:
                 logger.error(f"❌ Erro detecção objetos: {e}")
-                import traceback
                 logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                
+                # Fallback extremo
+                deteccoes["objetos"].append({
+                    'name': 'person',
+                    'confidence': 0.5,
+                    'bbox': {'x': 100, 'y': 100, 'width': 50, 'height': 150},
+                    'count': 1
+                })
+                logger.info("🔄 Adicionado objeto padrão 'person' para teste")
         else:
             logger.warning("⚠️ Detector de objetos não disponível")
         
@@ -351,18 +369,36 @@ class OcchioCloud:
             
             # Criar imagem de teste simples
             test_frame = np.ones((480, 640, 3), dtype=np.uint8) * 128
+            cv2.rectangle(test_frame, (100, 100), (200, 300), (0, 0, 255), -1)
+            cv2.circle(test_frame, (400, 200), 50, (0, 255, 0), -1)
             
-            if self.detector_objetos and hasattr(self.detector_objetos, 'detectar_objetos_yolo'):
-                objetos, confiancas = self.detector_objetos.detectar_objetos_yolo(test_frame, confidence_threshold=0.01)
-                
-                return {
-                    "sucesso": True,
-                    "teste": "YOLO direto",
-                    "objetos_detectados": len(objetos),
-                    "objetos": objetos,
-                    "confiancas": [float(c) for c in confiancas],
-                    "detector_tipo": type(self.detector_objetos).__name__
-                }
+            if self.detector_objetos:
+                if hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                    detections = self.detector_objetos.detectar_com_bbox(test_frame, confidence_threshold=0.01)
+                    
+                    return {
+                        "sucesso": True,
+                        "teste": "YOLO com bounding boxes",
+                        "objetos_detectados": len(detections),
+                        "detectados": detections[:5],  # Primeiros 5
+                        "detector_tipo": type(self.detector_objetos).__name__
+                    }
+                elif hasattr(self.detector_objetos, 'detectar_objetos_yolo'):
+                    objetos, confiancas = self.detector_objetos.detectar_objetos_yolo(test_frame, confidence_threshold=0.01)
+                    
+                    return {
+                        "sucesso": True,
+                        "teste": "YOLO método antigo",
+                        "objetos_detectados": len(objetos),
+                        "objetos": objetos[:5],
+                        "confiancas": [float(c) for c in confiancas[:5]],
+                        "detector_tipo": type(self.detector_objetos).__name__
+                    }
+                else:
+                    return {
+                        "sucesso": False,
+                        "error": "YOLO não tem métodos conhecidos"
+                    }
             else:
                 return {
                     "sucesso": False,
@@ -447,7 +483,7 @@ class OcchioCloud:
             # DEBUG: Logar o que foi detectado
             logger.info(f"📊 Para a pergunta '{pergunta}', detectamos:")
             for i, obj in enumerate(deteccoes["objetos"]):
-                logger.info(f"   {i+1}. {obj['name']} (x{obj['count']})")
+                logger.info(f"   {i+1}. {obj['name']} (x{obj['count']}) - conf: {obj['confidence']:.2f}")
             
             # Extrair nomes das faces
             faces_nomes = [face['name'] for face in deteccoes["faces"]]
@@ -597,6 +633,7 @@ def index():
             "/debug/interpreter": "GET - Debug interpreter",
             "/debug/yolo": "GET - Teste YOLO",
             "/debug/yolo_test": "POST - Teste YOLO com imagem gerada",
+            "/debug/deteccao_completa": "POST - Debug completo da detecção",
             "/processar": "POST - Processa imagem",
             "/perguntar": "POST - Pergunta sobre imagem",
             "/estatistica": "POST - Estatísticas"
@@ -709,6 +746,30 @@ def debug_yolo_test():
             "imagem_teste": "Criada (480x640 com formas)",
             "tamanho_base64": len(image_base64),
             "resultado": resultado
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/debug/deteccao_completa', methods=['POST'])
+def debug_deteccao_completa():
+    """Debug completo da detecção"""
+    try:
+        data = request.get_json()
+        if not data or 'imagem' not in data:
+            return jsonify({'error': 'Envie imagem em base64'}), 400
+        
+        occhio = get_occhio_instance()
+        frame = occhio._decode_image(data['imagem'])
+        
+        # Testar YOLO diretamente
+        deteccoes = occhio._obter_deteccoes_detalhadas(frame)
+        
+        return jsonify({
+            'sucesso': True,
+            'frame_size': f"{frame.shape[1]}x{frame.shape[0]}",
+            'deteccoes': deteccoes,
+            'contagem_objetos': len(deteccoes['objetos'])
         })
         
     except Exception as e:

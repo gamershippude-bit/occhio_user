@@ -71,6 +71,15 @@ class YOLODetector:
                 logger.error("❌ Modelo YOLO não inicializado")
                 return []
             
+            # Redimensionar para melhor performance (mantendo proporção)
+            h, w = frame.shape[:2]
+            if max(h, w) > 640:
+                scale = 640 / max(h, w)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                frame = cv2.resize(frame, (new_w, new_h))
+                logger.debug(f"📏 Frame redimensionado: {new_w}x{new_h}")
+            
             # Executar inferência
             results = self.model(frame, conf=confidence_threshold, verbose=False)
             
@@ -83,6 +92,9 @@ class YOLODetector:
                     class_ids = result.boxes.cls.cpu().numpy().astype(int)
                     
                     for i, (box, conf, cls_id) in enumerate(zip(boxes, confidences, class_ids)):
+                        if conf < confidence_threshold:
+                            continue
+                            
                         class_name = self.classes[cls_id] if cls_id < len(self.classes) else f'class_{cls_id}'
                         
                         # FILTRO ESPECIAL PARA "SPORTS BALL" - aumentar confiança mínima
@@ -102,6 +114,7 @@ class YOLODetector:
                             logger.debug(f"⏩ Ignorando objeto muito pequeno: {class_name} ({box_width}x{box_height})")
                             continue
                         
+                        # Adicionar à lista de detecções
                         detections.append({
                             'class': class_name,
                             'confidence': float(conf),
@@ -119,11 +132,17 @@ class YOLODetector:
             # Remover duplicatas (mesma classe com overlap)
             detections = self._remover_duplicatas(detections)
             
-            logger.info(f"🔍 YOLO detectou {len(detections)} objetos: {[d['class'] for d in detections]}")
+            logger.info(f"🔍 YOLO detectou {len(detections)} objetos")
+            if detections:
+                for i, det in enumerate(detections[:5]):  # Mostrar apenas 5 primeiros
+                    logger.info(f"   [{i+1}] {det['class']}: {det['confidence']:.3f}")
+            
             return detections
             
         except Exception as e:
             logger.error(f"❌ Erro na detecção YOLO: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return []
     
     def _remover_duplicatas(self, detections, iou_threshold=0.5):
@@ -249,3 +268,44 @@ class YOLODetector:
         except Exception as e:
             logger.error(f"❌ Erro na detecção agrupada: {e}")
             return []
+    
+    def detectar_objetos_yolo(self, frame, confidence_threshold=0.25):
+        """Método de compatibilidade com versão antiga"""
+        try:
+            detections = self.detectar_com_bbox(frame, confidence_threshold)
+            
+            # Extrair apenas nomes das classes
+            objetos = [d['class'] for d in detections]
+            confiancas = [d['confidence'] for d in detections]
+            
+            return objetos, confiancas
+            
+        except Exception as e:
+            logger.error(f"❌ Erro detectar_objetos_yolo: {e}")
+            return [], []
+    
+    def testar_deteccao(self, frame):
+        """Método de teste simples"""
+        try:
+            logger.info("🧪 Testando detecção YOLO...")
+            
+            # Redimensionar para melhor performance
+            if frame.shape[0] > 640:
+                scale = 640 / frame.shape[0]
+                new_w = int(frame.shape[1] * scale)
+                new_h = int(frame.shape[0] * scale)
+                frame = cv2.resize(frame, (new_w, new_h))
+            
+            # Detectar
+            detections = self.detectar_com_bbox(frame, confidence_threshold=0.15)
+            
+            # Log detalhado
+            logger.info(f"📊 Resultado do teste:")
+            for i, det in enumerate(detections[:5]):  # Mostrar apenas 5 primeiros
+                logger.info(f"  {i+1}. {det['class']}: {det['confidence']:.2f} at ({det['bbox']['x']}, {det['bbox']['y']})")
+            
+            return len(detections)
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no teste YOLO: {e}")
+            return 0
