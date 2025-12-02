@@ -1,6 +1,6 @@
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
-VERSÃO SIMPLIFICADA COM INTERPRETER CORRIGIDO
+VERSÃO FINAL COM INTERPRETER CORRIGIDO
 """
 
 import cv2
@@ -32,20 +32,39 @@ _occhio_instance = None
 _initialization_lock = threading.Lock()
 
 class OcchioCloud:
-    """Classe principal do sistema Occhio Cloud - VERSÃO SIMPLIFICADA"""
+    """Classe principal do sistema Occhio Cloud"""
 
     def __init__(self, api_key=None):
         try:
-            logger.info("🚀 Iniciando Occhio Cloud Backend - Versão Simplificada")
+            logger.info("=" * 60)
+            logger.info("🚀 INICIANDO OCCHIO CLOUD BACKEND")
+            logger.info("=" * 60)
             
-            # Verificar API key do OpenAI
+            # VERIFICAÇÃO DETALHADA DA API KEY
             self.api_key = api_key or os.getenv('OPENAI_API_KEY')
-            if not self.api_key:
-                logger.warning("⚠️ OPENAI_API_KEY não encontrada - usando modo local")
-                self.openai_available = False
+            
+            logger.info(f"📦 API key disponível: {'✅ SIM' if self.api_key else '❌ NÃO'}")
+            
+            if self.api_key:
+                # Verificar se é uma string válida
+                if isinstance(self.api_key, str) and self.api_key.strip():
+                    logger.info(f"📦 Tamanho da API key: {len(self.api_key)} caracteres")
+                    logger.info(f"📦 Prefixo da API key: {self.api_key[:8]}...")
+                    
+                    if self.api_key.startswith('sk-'):
+                        logger.info("✅ Formato OpenAI detectado (sk-...)")
+                    else:
+                        logger.warning("⚠️ API key não começa com 'sk-', mas tentaremos usar")
+                    
+                    self.openai_available = True
+                else:
+                    logger.warning("⚠️ API key está vazia ou inválida")
+                    logger.warning(f"⚠️ Valor: {repr(self.api_key)}")
+                    self.openai_available = False
             else:
-                logger.info(f"📦 OpenAI API key disponível")
-                self.openai_available = True
+                logger.warning("⚠️ OPENAI_API_KEY NÃO ENCONTRADA!")
+                logger.warning("⚠️ O sistema funcionará em modo local")
+                self.openai_available = False
             
             # Inicializar componentes
             self.detector_objetos = None
@@ -56,10 +75,13 @@ class OcchioCloud:
             # Inicializar YOLO
             self._inicializar_yolo()
             
-            # Inicializar Interpreter
+            # Inicializar Interpreter (com a API key)
             self._inicializar_interpreter()
             
-            logger.info("🎉 Occhio Cloud inicializado com sucesso!")
+            logger.info("=" * 60)
+            logger.info("🎉 OCCHIO CLOUD INICIALIZADO COM SUCESSO!")
+            logger.info(f"📊 Estado: {'OpenAI ATIVO' if self.openai_available else 'MODO LOCAL'}")
+            logger.info("=" * 60)
             
         except Exception as e:
             logger.error(f"💥 ERRO CRÍTICO NA INICIALIZAÇÃO: {e}")
@@ -88,31 +110,40 @@ class OcchioCloud:
         try:
             from Utils.interpreter import Interpreter
             
-            # Passar a API key para o Interpreter
+            # Log detalhado
+            logger.info(f"📦 Passando API key para Interpreter: {'SIM' if self.api_key else 'NÃO'}")
+            
+            # Criar interpreter COM a API key
             self.interpreter = Interpreter(api_key=self.api_key)
             
-            # Verificar se o cliente OpenAI foi configurado
-            if hasattr(self.interpreter, 'client') and self.interpreter.client is None:
-                logger.warning("⚠️ Interpreter não conseguiu configurar cliente OpenAI")
-                # Forçar modo local
-                self.interpreter.client = None
+            # Verificar estado do interpreter
+            if hasattr(self.interpreter, 'client'):
+                if self.interpreter.client is not None:
+                    logger.info("✅ Interpreter OpenAI inicializado com sucesso!")
+                    # Confirmar que OpenAI está disponível
+                    self.openai_available = True
+                else:
+                    logger.warning("⚠️ Interpreter está em modo local (client=None)")
+                    self.openai_available = False
             else:
-                logger.info("✅ Interpreter OpenAI inicializado")
+                logger.error("❌ Interpreter não tem atributo 'client'")
+                self.openai_available = False
                 
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar Interpreter: {e}")
             logger.info("🔄 Usando interpreter local...")
             self.interpreter = self._create_interpreter_local()
+            self.openai_available = False
 
     def _create_detector_local(self):
-        """Cria um detector local"""
+        """Cria um detector local básico"""
         class DetectorLocal:
             def detectar_objetos_yolo(self, frame, confidence_threshold=0.15):
                 h, w = frame.shape[:2]
                 objetos = []
                 confiancas = []
                 
-                # Sempre detectar pelo menos uma pessoa
+                # Detectar pessoas se a imagem for grande o suficiente
                 if h > 100 and w > 100:
                     objetos.append('person')
                     confiancas.append(0.85)
@@ -136,22 +167,19 @@ class OcchioCloud:
         return DetectorLocal()
 
     def _create_interpreter_local(self):
-        """Cria um interpreter local"""
+        """Cria um interpreter local básico"""
         class InterpreterLocal:
             def __init__(self):
-                self.client = None  # Sem cliente OpenAI
+                self.client = None
             
             def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
-                return "Olá! Sou a Specula, sua assistente visual. No momento estou em modo local."
+                return "Olá! Sou a Specula, sua assistente visual."
             
             def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
-                # Verificar se é pergunta sobre tempo
-                if self._e_pergunta_tempo(pergunta):
-                    return self._responder_tempo_local(pergunta)
-                
+                # Esta é uma versão local simples
                 return {
                     'sucesso': True,
-                    'resposta': "Olá! Sou a Specula. No momento estou em modo local.",
+                    'resposta': "Olá! Sou a Specula. Estou em modo local.",
                     'pergunta': pergunta,
                     'timestamp': time.time(),
                     'tempo_total': "0.5s",
@@ -169,39 +197,6 @@ class OcchioCloud:
                     },
                     'timestamp': time.time()
                 }
-            
-            def _e_pergunta_tempo(self, pergunta):
-                pergunta_lower = pergunta.lower()
-                palavras_tempo = ['que horas', 'que hora', 'horas são', 'hora é', 'que dia', 'data', 'que ano']
-                return any(palavra in pergunta_lower for palavra in palavras_tempo)
-            
-            def _responder_tempo_local(self, pergunta):
-                pergunta_lower = pergunta.lower()
-                
-                if 'horas' in pergunta_lower or 'hora' in pergunta_lower:
-                    agora = time.localtime()
-                    hora_str = time.strftime("%H:%M", agora)
-                    return {
-                        'sucesso': True,
-                        'resposta': f"São {hora_str}.",
-                        'pergunta': pergunta,
-                        'timestamp': time.time(),
-                        'tempo_total': "0.5s",
-                        'tipo_pergunta': 'geral',
-                        'correlacao_com_imagem': False,
-                        'dados_utilizados': 'modo local'
-                    }
-                
-                return {
-                    'sucesso': True,
-                    'resposta': "Olá! Sou a Specula. No momento estou em modo local.",
-                    'pergunta': pergunta,
-                    'timestamp': time.time(),
-                    'tempo_total': "0.5s",
-                    'tipo_pergunta': 'geral',
-                    'correlacao_com_imagem': False,
-                    'dados_utilizados': 'modo local'
-                }
         
         return InterpreterLocal()
 
@@ -211,11 +206,8 @@ class OcchioCloud:
         self.interpreter = self._create_interpreter_local()
         self.detector_faces = None
         self.db = None
-        logger.warning("⚠️ Sistema em modo emergência - usando componentes locais")
-
-    # ... (MANTENHA OS MÉTODOS: _decode_image, _obter_deteccoes_detalhadas,
-    # processar_imagem_seguranca, perguntar_sobre_imagem, obter_estatisticas_detalhadas,
-    # obter_estatisticas_sistema) ...
+        self.openai_available = False
+        logger.warning("⚠️ Sistema em modo emergência")
 
     def _decode_image(self, image_data):
         """Decodifica imagem"""
@@ -346,22 +338,9 @@ class OcchioCloud:
             logger.info(f"💬 Processando pergunta: '{pergunta}'")
             start_time = time.time()
             
-            # Verificar se é pergunta geral que não precisa de imagem
-            pergunta_lower = pergunta.lower()
-            perguntas_gerais_sem_imagem = [
-                'que horas', 'que hora', 'horas são', 'hora é',
-                'que dia', 'data', 'que ano', 'oque é', 'o que é',
-                'qual a temperatura', 'como você está', 'quem é você'
-            ]
-            
-            precisa_imagem = not any(palavra in pergunta_lower for palavra in perguntas_gerais_sem_imagem)
-            
-            frame = None
-            deteccoes = {"objetos": [], "faces": []}
-            
-            if precisa_imagem:
-                frame = self._decode_image(image_data)
-                deteccoes = self._obter_deteccoes_detalhadas(frame)
+            # Decodificar imagem (mesmo para perguntas gerais, precisa decodificar)
+            frame = self._decode_image(image_data)
+            deteccoes = self._obter_deteccoes_detalhadas(frame)
             
             # Extrair nomes das faces
             faces_nomes = [face['name'] for face in deteccoes["faces"]]
@@ -480,9 +459,11 @@ def get_occhio_instance():
                     # Obter API key do ambiente
                     api_key = os.getenv('OPENAI_API_KEY')
                     
-                    if not api_key:
-                        logger.warning("⚠️ OPENAI_API_KEY não configurada no ambiente")
-                        logger.warning("⚠️ O sistema funcionará em modo local")
+                    logger.info(f"🔧 Criando instância OcchioCloud...")
+                    logger.info(f"📦 OPENAI_API_KEY do ambiente: {'✅ SIM' if api_key else '❌ NÃO'}")
+                    
+                    if api_key:
+                        logger.info(f"📦 Tamanho da key: {len(api_key)}")
                     
                     _occhio_instance = OcchioCloud(api_key=api_key)
                     
@@ -497,10 +478,20 @@ def get_occhio_instance():
 def index():
     return jsonify({
         "app": "Occhio Cloud API",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "status": "online",
         "timestamp": time.time(),
-        "features": "YOLO + Interpreter Simplificado"
+        "features": "YOLO + Specula AI",
+        "endpoints": {
+            "/": "GET - Esta página",
+            "/health": "GET - Health check",
+            "/system": "GET - Status do sistema",
+            "/debug/env": "GET - Debug variáveis",
+            "/debug/interpreter": "GET - Debug interpreter",
+            "/processar": "POST - Processa imagem",
+            "/perguntar": "POST - Pergunta sobre imagem",
+            "/estatistica": "POST - Estatísticas"
+        }
     })
 
 @app.route('/health')
@@ -535,6 +526,40 @@ def system():
             "success": False,
             "error": str(e)
         }), 500
+
+@app.route('/debug/env')
+def debug_env():
+    """Debug das variáveis de ambiente"""
+    import os
+    env_vars = {
+        'OPENAI_API_KEY': '✅ CONFIGURADA' if os.getenv('OPENAI_API_KEY') else '❌ NÃO CONFIGURADA',
+        'API_KEY_LENGTH': len(os.getenv('OPENAI_API_KEY', '')) if os.getenv('OPENAI_API_KEY') else 0,
+        'API_KEY_PREFIX': os.getenv('OPENAI_API_KEY', '')[:8] + '...' if os.getenv('OPENAI_API_KEY') else 'N/A',
+        'PYTHON_VERSION': os.getenv('PYTHON_VERSION', 'N/A'),
+        'PORT': os.getenv('PORT', '8080'),
+        'K_SERVICE': os.getenv('K_SERVICE', 'N/A'),
+        'K_REVISION': os.getenv('K_REVISION', 'N/A')
+    }
+    return jsonify(env_vars)
+
+@app.route('/debug/interpreter')
+def debug_interpreter():
+    """Debug do interpreter"""
+    try:
+        occhio = get_occhio_instance()
+        
+        info = {
+            'interpreter_type': type(occhio.interpreter).__name__,
+            'openai_available': occhio.openai_available,
+            'api_key_configured': bool(occhio.api_key),
+            'interpreter_has_client': hasattr(occhio.interpreter, 'client') and occhio.interpreter.client is not None,
+            'interpreter_client_type': type(occhio.interpreter.client).__name__ if hasattr(occhio.interpreter, 'client') and occhio.interpreter.client else None,
+            'timestamp': time.time()
+        }
+        
+        return jsonify(info)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/processar', methods=['POST'])
 def processar():
@@ -599,19 +624,21 @@ def estatistica():
             "timestamp": time.time()
         }), 500
 
+# ========== MIDDLEWARE ==========
+
+@app.before_request
+def initialize_on_first_request():
+    """Inicializa na primeira requisição"""
+    try:
+        get_occhio_instance()
+    except Exception as e:
+        logger.error(f"❌ Erro na inicialização: {e}")
+
 # ========== EXECUÇÃO ==========
 
 if __name__ == "__main__":
     port = int(os.getenv('PORT', '8080'))
-    logger.info(f"🚀 Iniciando Occhio Cloud v3.0 na porta {port}")
-    
-    # Verificar variáveis de ambiente
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        logger.warning("=" * 60)
-        logger.warning("⚠️  ATENÇÃO: OPENAI_API_KEY não configurada!")
-        logger.warning("⚠️  O sistema funcionará em modo local")
-        logger.warning("=" * 60)
+    logger.info(f"🚀 Iniciando Occhio Cloud v4.0 na porta {port}")
     
     try:
         from waitress import serve
