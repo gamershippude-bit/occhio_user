@@ -7,63 +7,67 @@ VERSÃO FINAL COM OPENAI v1.x FIX
 import os
 import sys
 
-# 1. REMOVER variáveis de proxy do ambiente (Cloud Run adiciona automaticamente)
+print("🚀 INICIANDO OCCHIO CLOUD COM FIX DEFINITIVO")
+print("=" * 60)
+
+# 1. REMOVER COMPLETAMENTE todas as variáveis de proxy
 proxy_env_vars = [
     'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 
     'http_proxy', 'https_proxy', 'all_proxy',
-    'OPENAI_PROXY', 'OPENAI_BASE_URL'  # OpenAI-specific
+    'OPENAI_PROXY', 'OPENAI_BASE_URL',
+    'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
+    'NO_PROXY', 'no_proxy'
 ]
 
 for var in proxy_env_vars:
     if var in os.environ:
-        print(f"⚠️ Removendo variável de ambiente {var}: {os.environ[var]}")
+        print(f"⚠️ REMOVENDO variável de ambiente: {var}")
         os.environ.pop(var, None)
 
-# 2. MONKEY PATCH para garantir que proxies não seja passado
+# 2. PATCH ULTRA AGRESSIVO para OpenAI
 try:
     import openai
+    
+    print(f"📦 OpenAI version: {openai.__version__}")
+    
+    # Verificar se é versão problemática
+    if openai.__version__.startswith('1.0.') or openai.__version__.startswith('1.1.') or openai.__version__.startswith('1.2.') or openai.__version__.startswith('1.3.'):
+        print(f"🚨 VERSÃO PROBLEMÁTICA: {openai.__version__}")
+        print("🚨 Recomendado: pip install openai>=1.30.0")
     
     if hasattr(openai, 'OpenAI'):
         original_init = openai.OpenAI.__init__
         
         def patched_init(self, *args, **kwargs):
-            # Debug: ver o que está sendo passado
-            if kwargs:
-                print(f"🔧 OpenAI.__init__ recebeu: {list(kwargs.keys())}")
+            # Debug detalhado
+            print(f"🔧 OpenAI.__init__ chamado com:")
+            print(f"   args: {args}")
+            print(f"   kwargs keys: {list(kwargs.keys())}")
             
-            # Remover proxies explicitamente
-            if 'proxies' in kwargs:
-                print(f"🚨 REMOVENDO 'proxies': {kwargs['proxies']}")
-                kwargs.pop('proxies')
+            # Remover ABSOLUTAMENTE TUDO que não seja api_key
+            clean_kwargs = {}
             
-            # Garantir que temos apenas parâmetros válidos
-            valid_params = ['api_key', 'base_url', 'timeout', 'max_retries', 
-                           'default_headers', 'default_query', 'http_client']
+            # Apenas api_key é permitido
+            if 'api_key' in kwargs:
+                clean_kwargs['api_key'] = kwargs['api_key']
+                print(f"✅ Mantendo api_key")
             
-            # Filtrar parâmetros inválidos
-            invalid_keys = [k for k in kwargs.keys() if k not in valid_params]
-            for key in invalid_keys:
-                print(f"⚠️ Removendo parâmetro inválido: {key}")
-                kwargs.pop(key, None)
+            # Remover TUDO mais
+            for key in list(kwargs.keys()):
+                if key != 'api_key':
+                    print(f"🚨 REMOVENDO completamente: {key}")
             
-            # Chamar original com parâmetros limpos
-            return original_init(self, *args, **kwargs)
+            # Chamar original com APENAS api_key
+            return original_init(self, *args, **clean_kwargs)
         
         openai.OpenAI.__init__ = patched_init
-        print("✅ OpenAI v1.x patch aplicado com sucesso")
+        print("✅ PATCH ULTRA AGRESSIVO aplicado: permitindo apenas api_key")
         
 except Exception as e:
     print(f"⚠️ Erro no patch OpenAI: {e}")
 
-# 3. VERIFICAÇÃO FINAL
 print(f"📦 Python: {sys.version}")
-print(f"📦 OpenAI version: ", end="")
-try:
-    import openai
-    print(openai.__version__)
-except:
-    print("N/A")
-print("=" * 50)
+print("=" * 60)
 
 # ================== IMPORTS ORIGINAIS ==================
 import cv2

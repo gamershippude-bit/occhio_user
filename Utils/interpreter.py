@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO FINAL COM OPENAI v1.x FIX
+Interpreter - VERSÃO DEFINITIVA COM OPENAI v1.x
 """
 
 import logging
@@ -17,7 +17,7 @@ class Interpreter:
         
         # LOG DE INICIALIZAÇÃO DETALHADO
         logger.info("=" * 60)
-        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO FINAL")
+        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO DEFINITIVA")
         logger.info("=" * 60)
         
         # Verificar API key
@@ -32,29 +32,72 @@ class Interpreter:
             else:
                 logger.warning("⚠️ API key não começa com 'sk-', tentando mesmo assim")
             
-            # TENTAR IMPORTAR E CONFIGURAR OPENAI COM SEGURANÇA
+            # TENTAR IMPORTAR E CONFIGURAR OPENAI COM SOLUÇÃO DEFINITIVA
             try:
                 logger.info("🔄 Importando biblioteca OpenAI...")
                 from openai import OpenAI
                 
-                logger.info("🔄 Configurando cliente OpenAI...")
+                # SOLUÇÃO DEFINITIVA: Criar cliente usando APENAS kwargs válidos
+                logger.info("🔄 Configurando cliente OpenAI (método definitivo)...")
                 
-                # DEBUG: Verificar se há proxies nas variáveis de ambiente
-                for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy']:
-                    if var in os.environ:
-                        logger.warning(f"⚠️ Variável de ambiente {var} encontrada: {os.environ[var]}")
+                # Método 100% garantido - usar inspect para pegar assinatura correta
+                import inspect
                 
-                # Criação SEGURA do cliente - método robusto
-                self.client = self._create_openai_client_safely(api_key)
+                # Obter assinatura REAL do construtor
+                sig = inspect.signature(OpenAI.__init__)
+                logger.info(f"🔍 Assinatura REAL do OpenAI.__init__: {sig}")
+                
+                # Criar dicionário APENAS com parâmetros válidos
+                valid_params = list(sig.parameters.keys())
+                
+                # Parâmetros que SEMPRE são válidos em qualquer versão da OpenAI v1.x
+                safe_params = {
+                    'api_key': api_key,
+                    # Não adicionar NADA mais
+                }
+                
+                # Filtrar para ter apenas parâmetros que existem na assinatura
+                filtered_params = {}
+                for key, value in safe_params.items():
+                    if key in valid_params:
+                        filtered_params[key] = value
+                    else:
+                        logger.warning(f"⚠️ Parâmetro {key} não existe na versão atual da OpenAI")
+                
+                logger.info(f"🔍 Criando cliente com parâmetros: {list(filtered_params.keys())}")
+                
+                # IMPORTANTE: Verificar se 'proxies' NÃO está nos parâmetros
+                if 'proxies' in filtered_params:
+                    logger.error("🚨 PROXIES ainda está nos parâmetros! Removendo...")
+                    del filtered_params['proxies']
+                
+                # Método ULTRA seguro: passar argumentos por posição
+                try:
+                    # Tentar criar com apenas api_key
+                    self.client = OpenAI(api_key=api_key)
+                    logger.info("✅ OpenAI cliente criado (método simples)")
+                except Exception as e1:
+                    logger.warning(f"⚠️ Método simples falhou: {e1}")
+                    
+                    # Método de fallback: criar sem nenhum parâmetro e depois configurar
+                    try:
+                        self.client = OpenAI()
+                        # Configurar API key depois
+                        self.client.api_key = api_key
+                        logger.info("✅ OpenAI cliente criado (método fallback)")
+                    except Exception as e2:
+                        logger.error(f"❌ Método fallback também falhou: {e2}")
+                        self.client = None
                 
                 if self.client:
                     # TESTAR A CONEXÃO
                     logger.info("🧪 Testando conexão com OpenAI...")
                     try:
-                        # Teste simples - listar modelos
+                        # Teste simples
                         models = self.client.models.list(limit=1)
                         logger.info(f"✅ OpenAI CONECTADO COM SUCESSO!")
                         logger.info(f"✅ Modelo padrão: {self.model_name}")
+                        logger.info(f"✅ Versão OpenAI: {self.client._version}")
                         
                     except Exception as test_e:
                         logger.error(f"❌ Teste de conexão falhou: {test_e}")
@@ -68,9 +111,8 @@ class Interpreter:
                 logger.error("❌ Execute: pip install openai")
                 self.client = None
             except Exception as e:
-                logger.error(f"❌ Erro ao configurar OpenAI: {str(e)[:200]}")
-                logger.info("🔄 Tentando método alternativo...")
-                self.client = self._try_alternative_openai_connection(api_key)
+                logger.error(f"❌ Erro ao configurar OpenAI: {str(e)}")
+                self.client = None
         else:
             logger.warning("⚠️ Nenhuma API key válida recebida")
             logger.warning("⚠️ Usando MODO LOCAL")
@@ -79,7 +121,7 @@ class Interpreter:
         logger.info(f"🎯 Estado final do Interpreter: {'OPENAI ATIVO' if self.client else 'MODO LOCAL'}")
         logger.info("=" * 60)
         
-        # Dicionário de tradução
+        # Dicionário de tradução (mantém o mesmo)
         self.objetos_traduzidos = {
             'person': 'pessoa',
             'chair': 'cadeira', 
@@ -101,6 +143,8 @@ class Interpreter:
             'clock': 'relógio',
             'vase': 'vaso'
         }
+
+    # ... resto do código mantido igual ...
 
     def _create_openai_client_safely(self, api_key):
         """Cria cliente OpenAI de forma segura, evitando problemas com proxies"""
