@@ -145,6 +145,7 @@ REGRAS IMPORTANTES PARA DEFICIENTES VISUAIS:
 4. Use informações de posição quando disponível
 5. Seja clara e direta nas descrições
 6. Use pontos de referência espaciais
+7. NUNCA mencione porcentagens ou confianças das detecções
 
 EXEMPLOS ADEQUADOS:
 - "Estou detectando uma pessoa no centro da imagem."
@@ -155,6 +156,8 @@ EXEMPLOS INADEQUADOS (NUNCA USE):
 - "Se você puder descrever melhor..." ❌
 - "Me dê mais detalhes sobre..." ❌
 - "O que você está vendo?" ❌
+- "Com 80% de confiança..." ❌
+- "A detecção tem 90% de certeza..." ❌
 
 Descreva o ambiente baseado nos dados acima:"""
                         },
@@ -300,7 +303,7 @@ Descreva o ambiente baseado nos dados acima:"""
 ## QUEM VOCÊ É:
 Você é a Specula, uma assistente especializada em descrever ambientes para pessoas com deficiência visual. Você NUNCA pede para a pessoa descrever o que está vendo.
 
-## DADOS DETECTADOS NA IMAGEM ATUAL (COM POSIÇÕES E CONFIANÇAS):
+## DADOS DETECTADOS NA IMAGEM ATUAL:
 {dados_texto}
 
 ## CONTEXTO DA PERGUNTA:
@@ -314,13 +317,13 @@ Você é a Specula, uma assistente especializada em descrever ambientes para pes
 ❌ NUNCA diga "se você puder descrever"
 ❌ NUNCA diga "se você tiver mais informações"
 ❌ NUNCA sugira que o usuário precisa ver algo
+❌ NUNCA mencione porcentagens ou níveis de confiança
 
 ## COMO RESPONDER PARA DEFICIENTES VISUAIS:
 
 ### SE A PERGUNTA É SOBRE A IMAGEM (use os dados acima):
 - Baseie-se APENAS nos dados detectados
 - Use informações de posição (esquerda, direita, centro) quando disponível
-- Mencione confiança da detecção quando relevante
 - Se a pergunta for sobre algo não detectado: "Não estou detectando [objeto] nesta imagem"
 - Se não tem dados suficientes: "Não estou conseguindo identificar [elemento] com clareza"
 - Use descrições táteis/spaciais quando possível
@@ -340,16 +343,18 @@ Você é a Specula, uma assistente especializada em descrever ambientes para pes
 ### EXEMPLOS DE RESPOSTAS ADEQUADAS:
 - "Vejo uma pessoa no centro da imagem."
 - "Não estou detectando cadeiras neste ambiente."
-- "Há uma mesa à direita, a cerca de 2 metros de distância."
-- "A imagem parece mostrar um ambiente interno bem iluminado."
+- "Há uma mesa à direita."
+- "A imagem parece mostrar um ambiente interno."
 
 ### EXEMPLOS DE RESPOSTAS INADEQUADAS (EVITAR):
 - "Se você puder descrever melhor..." ❌
 - "Me dê mais detalhes..." ❌
 - "O que você está vendo?" ❌
 - "Descreva o ambiente para mim..." ❌
+- "Com 80% de certeza..." ❌
+- "A confiança da detecção é 90%" ❌
 
-IMPORTANTE: Você é a Specula, os olhos do usuário. Descreva o que está detectando sem nunca pedir ajuda visual ao usuário.
+IMPORTANTE: Você é a Specula, os olhos do usuário. Descreva o que está detectando sem nunca pedir ajuda visual ao usuário e sem mencionar confianças.
 
 Agora responda à pergunta:"""
                 
@@ -392,7 +397,7 @@ Agora responda à pergunta:"""
             return self._responder_local_adaptado(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados, start_time)
 
     def _verificar_pergunta_tempo(self, pergunta):
-        """Verifica pergunta sobre tempo - MÉTODO QUE FALTAVA!"""
+        """Verifica pergunta sobre tempo"""
         pergunta_lower = pergunta.lower()
         
         if any(palavra in pergunta_lower for palavra in ['que horas', 'que hora', 'horas são', 'hora é']):
@@ -557,7 +562,7 @@ Agora responda à pergunta:"""
         elif any(palavra in pergunta_lower for palavra in ['interna', 'externa', 'dentro', 'fora']):
             # Baseado nos objetos detectados, tentar inferir
             if 'person' in contador_objetos and len(contador_objetos) == 1:
-                return "Com base na detecção, parece ser um ambiente interno, mas não tenho certeza absoluta."
+                return "Com base na detecção, parece ser um ambiente interno."
             else:
                 return "Não tenho informações suficientes para determinar se é interno ou externo."
         
@@ -599,7 +604,7 @@ Agora responda à pergunta:"""
         return f"{objetos_count} objetos, {faces_count} pessoas"
 
     def _formatar_dados_para_prompt(self, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados=None):
-        """Formata dados para o prompt - VERSÃO MELHORADA"""
+        """Formata dados para o prompt - SEM INFORMAÇÕES DE CONFIANÇA PARA O USUÁRIO"""
         partes = []
         
         # Pessoas
@@ -610,50 +615,36 @@ Agora responda à pergunta:"""
             if faces_nomes and any(n != 'Desconhecido' for n in faces_nomes):
                 conhecidas = [n for n in faces_nomes if n != 'Desconhecido']
                 if conhecidas:
-                    partes.append(f"Pessoas identificadas: {', '.join(conhecidas)}")
+                    if len(conhecidas) == 1:
+                        partes.append(f"1 pessoa identificada: {conhecidas[0]}")
+                    else:
+                        pessoas_str = ', '.join(conhecidas[:-1]) + ' e ' + conhecidas[-1]
+                        partes.append(f"{len(conhecidas)} pessoas identificadas: {pessoas_str}")
             else:
-                partes.append(f"Pessoas: {total_detectado}")
+                if total_detectado == 1:
+                    partes.append("1 pessoa")
+                else:
+                    partes.append(f"{total_detectado} pessoas")
         
-        # Objetos DETALHADOS (se disponível)
+        # Objetos DETALHADOS (se disponível) - SEM CONFIANÇA
         if objetos_detalhados:
+            # Agrupar objetos por tipo primeiro
+            objetos_agrupados = {}
             for obj in objetos_detalhados:
                 nome = obj.get('name', '')
                 quantidade = obj.get('count', 1)
-                confianca = obj.get('confidence', 0)
-                bbox = obj.get('bbox', {})
-                
-                # Traduzir para português
-                nome_pt = self._traduzir_objeto(nome)
-                
-                # Formatar posição relativa (se temos bounding box)
-                posicao = ""
-                if bbox and 'x' in bbox and 'width' in bbox:
-                    x = bbox.get('x', 0)
-                    w = bbox.get('width', 0)
-                    width_img = 640  # Assumir imagem padrão
-                    
-                    # Determinar posição relativa
-                    center_x = x + w/2
-                    if center_x < width_img * 0.33:
-                        posicao = "à esquerda"
-                    elif center_x > width_img * 0.66:
-                        posicao = "à direita"
-                    else:
-                        posicao = "no centro"
-                
-                # Formatar confiança
-                conf_str = f"{confianca:.0%}"
+                if nome not in objetos_agrupados:
+                    objetos_agrupados[nome] = 0
+                objetos_agrupados[nome] += quantidade
+            
+            # Formatar objetos agrupados
+            for nome_ingles, quantidade in objetos_agrupados.items():
+                nome_pt = self._traduzir_objeto(nome_ingles)
                 
                 if quantidade == 1:
-                    if posicao:
-                        partes.append(f"1 {nome_pt} {posicao} (confiança: {conf_str})")
-                    else:
-                        partes.append(f"1 {nome_pt} (confiança: {conf_str})")
+                    partes.append(f"1 {nome_pt}")
                 else:
-                    if posicao:
-                        partes.append(f"{quantidade} {nome_pt}s {posicao} (confiança: {conf_str})")
-                    else:
-                        partes.append(f"{quantidade} {nome_pt}s (confiança: {conf_str})")
+                    partes.append(f"{quantidade} {nome_pt}s")
         
         # Fallback para contador simples
         elif contador_objetos:
