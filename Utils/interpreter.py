@@ -103,7 +103,7 @@ class Interpreter:
     # ========== MÉTODO PARA /processar ==========
 
     def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
-        """Gera descrição natural"""
+        """Gera descrição natural - ADAPTADA PARA DEFICIENTES VISUAIS"""
         logger.info("🌄 Gerando descrição natural")
         
         # Preparar dados
@@ -113,8 +113,13 @@ class Interpreter:
         # Se temos OpenAI disponível, usar IA
         if self.openai_available:
             try:
-                # Preparar dados para o prompt
-                dados_texto = self._formatar_dados_para_prompt(contador_objetos, total_pessoas, faces_nomes)
+                # Preparar dados para o prompt - VERSÃO ADAPTADA
+                dados_texto = self._formatar_dados_para_prompt(
+                    contador_objetos, 
+                    total_pessoas, 
+                    faces_nomes,
+                    objetos_detalhados=objetos_detectados
+                )
                 
                 import openai
                 
@@ -123,74 +128,107 @@ class Interpreter:
                     messages=[
                         {
                             "role": "system",
-                            "content": f"""Você é a Specula, uma assistente que descreve ambientes para pessoas com deficiência visual.
+                            "content": f"""Você é a Specula, uma assistente especializada em descrever ambientes para pessoas com deficiência visual.
 
 DADOS DETECTADOS NA IMAGEM:
 {dados_texto}
 
-REGRAS:
-1. Descreva APENAS o que está nos dados acima
-2. Não invente nada que não foi detectado
-3. Use artigos corretos: "uma bola", "um sofá"
-4. Seja natural e acolhedora
-5. Você é a Specula - apresente-se brevemente
+REGRAS IMPORTANTES PARA DEFICIENTES VISUAIS:
+1. NUNCA peça para o usuário descrever algo
+2. NUNCA diga "se você puder me dar mais detalhes"
+3. Baseie-se APENAS nos dados detectados
+4. Use informações de posição quando disponível
+5. Seja clara e direta nas descrições
+6. Use pontos de referência espaciais
 
-EXEMPLOS:
-- Se tem "2 pessoas" → "Tem duas pessoas."
-- Se tem "1 cadeira" → "Tem uma cadeira."
-- Se nada detectado → "Não estou identificando elementos específicos."
+EXEMPLOS ADEQUADOS:
+- "Estou detectando uma pessoa no centro da imagem."
+- "Vejo uma cadeira à direita."
+- "Não estou identificando objetos específicos no momento."
 
-Responda naturalmente:"""
+EXEMPLOS INADEQUADOS (NUNCA USE):
+- "Se você puder descrever melhor..." ❌
+- "Me dê mais detalhes sobre..." ❌
+- "O que você está vendo?" ❌
+
+Descreva o ambiente baseado nos dados acima:"""
                         },
-                        {"role": "user", "content": "Descreva o ambiente que está vendo:"}
+                        {"role": "user", "content": "Descreva o ambiente que estou vendo:"}
                     ],
                     max_tokens=150,
                     temperature=0.5,
                 )
-                
+
                 return response.choices[0].message.content.strip()
-                
+
             except Exception as e:
                 logger.error(f"❌ Erro OpenAI na descrição: {e}")
-                # Fallback para modo local
-                return self._gerar_descricao_local(contador_objetos, total_pessoas, faces_nomes)
+                # Fallback para modo local adaptado
+                return self._gerar_descricao_local_adaptada(contador_objetos, total_pessoas, faces_nomes, objetos_detectados)
         else:
-            # Modo local
-            return self._gerar_descricao_local(contador_objetos, total_pessoas, faces_nomes)
+            # Modo local adaptado
+            return self._gerar_descricao_local_adaptada(contador_objetos, total_pessoas, faces_nomes, objetos_detectados)
 
-    def _formatar_dados_para_prompt(self, contador_objetos, total_pessoas, faces_nomes):
-        """Formata dados para o prompt"""
+    def _gerar_descricao_local_adaptada(self, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados=None):
+        """Descrição local adaptada para deficientes visuais"""
         partes = []
-        
+
         # Pessoas
         pessoas_yolo = contador_objetos.get('person', 0)
         total_detectado = max(total_pessoas, pessoas_yolo)
-        
+
         if total_detectado > 0:
             if faces_nomes and any(n != 'Desconhecido' for n in faces_nomes):
                 conhecidas = [n for n in faces_nomes if n != 'Desconhecido']
-                if conhecidas:
-                    partes.append(f"Pessoas identificadas: {', '.join(conhecidas)}")
-            else:
-                partes.append(f"Pessoas: {total_detectado}")
-        
-        # Objetos
-        outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
-        if outros_objetos:
-            objetos_lista = []
-            for obj_ingles, quantidade in outros_objetos.items():
-                obj_pt = self._traduzir_objeto(obj_ingles)
-                if quantidade == 1:
-                    objetos_lista.append(f"1 {obj_pt}")
+                if len(conhecidas) == 1:
+                    partes.append(f"o {conhecidas[0]}")
                 else:
-                    objetos_lista.append(f"{quantidade} {obj_pt}s")
-            
-            partes.append(f"Objetos: {', '.join(objetos_lista)}")
-        
+                    partes.append(f"o {', '.join(conhecidas[:-1])} e o {conhecidas[-1]}")
+            else:
+                if total_detectado == 1:
+                    partes.append("uma pessoa")
+                elif total_detectado == 2:
+                    partes.append("duas pessoas")
+                else:
+                    partes.append(f"{total_detectado} pessoas")
+
+        # Objetos com detalhes se disponível
+        if objetos_detalhados:
+            for obj in objetos_detalhados:
+                nome = obj.get('name', '')
+                quantidade = obj.get('count', 1)
+
+                obj_pt = self._traduzir_objeto(nome)
+
+                if quantidade == 1:
+                    artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
+                    partes.append(f"{artigo} {obj_pt}")
+                else:
+                    partes.append(f"{quantidade} {obj_pt}s")
+
+        # Fallback para contador simples
+        elif contador_objetos:
+            outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
+            if outros_objetos:
+                for obj_ingles, quantidade in outros_objetos.items():
+                    obj_pt = self._traduzir_objeto(obj_ingles)
+
+                    if quantidade == 1:
+                        artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
+                        partes.append(f"{artigo} {obj_pt}")
+                    else:
+                        partes.append(f"{quantidade} {obj_pt}s")
+
         if not partes:
-            return "Nenhum objeto ou pessoa detectado."
-        
-        return " | ".join(partes)
+            return "Olá, sou a Specula. Não estou identificando elementos específicos nesta imagem no momento."
+
+        inicios = ["Estou detectando ", "Na imagem, vejo ", "Identifico ", "Estou vendo "]
+        inicio = random.choice(inicios)
+
+        if len(partes) == 1:
+            return f"{inicio}{partes[0]}."
+        else:
+            return f"{inicio}{', '.join(partes[:-1])} e {partes[-1]}."
 
     def _gerar_descricao_local(self, contador_objetos, total_pessoas, faces_nomes):
         """Descrição local"""
@@ -241,7 +279,7 @@ Responda naturalmente:"""
     # ========== MÉTODO PRINCIPAL PARA /perguntar ==========
 
     def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Responde perguntas"""
+        """Responde perguntas - VERSÃO ADAPTADA PARA DEFICIENTES VISUAIS"""
         logger.info(f"💬 Processando pergunta: '{pergunta}'")
         
         start_time = time.time()
@@ -265,53 +303,96 @@ Responda naturalmente:"""
         contador_objetos = self._contar_objetos(objetos_detectados)
         total_pessoas = len(faces_nomes or [])
         
+        # DEBUG: Log detalhado dos dados recebidos
+        logger.info(f"📥 Dados recebidos para a pergunta '{pergunta}':")
+        logger.info(f"   Total objetos: {len(objetos_detectados or [])}")
+        logger.info(f"   Contador: {contador_objetos}")
+        if objetos_detectados:
+            for i, obj in enumerate(objetos_detectados[:5]):
+                logger.info(f"   Objeto {i+1}: {obj.get('name')} x{obj.get('count', 1)} conf:{obj.get('confidence', 0):.2f}")
+        
         # Se temos OpenAI disponível, usar IA inteligente
         if self.openai_available:
             try:
-                # Preparar dados
-                dados_texto = self._formatar_dados_para_prompt(contador_objetos, total_pessoas, faces_nomes)
+                # Preparar dados DETALHADOS para o prompt
+                dados_texto = self._formatar_dados_para_prompt(
+                    contador_objetos, 
+                    total_pessoas, 
+                    faces_nomes,
+                    objetos_detalhados=objetos_detectados
+                )
+                
+                # DEBUG: Log dos dados enviados
+                logger.info(f"📤 Dados formatados para OpenAI:\n{dados_texto}")
                 
                 # Analisar se a pergunta é sobre a imagem
                 pergunta_lower = pergunta.lower()
                 parece_sobre_imagem = any(palavra in pergunta_lower for palavra in [
                     'imagem', 'foto', 'essa ', 'esta ', 'nesta ', 'dessa ',
                     'o que você vê', 'o que tem', 'descreva', 'analise',
-                    'quantas pessoas', 'tem ', 'há ', 'vejo', 'identifica'
+                    'quantas pessoas', 'tem ', 'há ', 'vejo', 'identifica',
+                    'onde está', 'posição', 'localização', 'lado', 'direita', 'esquerda',
+                    'quantos ', 'tem alguma', 'há alguma', 'ambiente', 'cena', 'cenário'
                 ])
                 
-                # Criar prompt inteligente
-                prompt = f"""# ESPECIFICAÇÕES DA SPECULA
-
-## QUEM VOCÊ É:
-Você é a Specula, uma assistente amigável, empática e útil.
-
-## DADOS DA IMAGEM ATUAL:
-{dados_texto}
-
-## CONTEXTO DA PERGUNTA:
-- Pergunta: "{pergunta}"
-- Parece ser sobre a imagem? {"SIM" if parece_sobre_imagem else "NÃO"}
-
-## COMO RESPONDER:
-
-### SE A PERGUNTA É SOBRE A IMAGEM:
-- Use os dados acima se disponíveis
-- Não invente o que não foi detectado
-- Use artigos corretos: "uma bola", "um sofá"
-- Se não tem dados: "Não estou detectando..."
-
-### SE A PERGUNTA É GERAL:
-- Responda naturalmente como um assistente
-- Seja útil e amigável
-- Use emojis ocasionalmente 😊
-- Se não souber: "Não tenho essa informação, mas posso ajudar com imagens!"
-
-### SEMPRE:
-- Seja a Specula: acolhedora, paciente e útil
-- Variedade nas respostas
-- Humanização: fale como pessoa real
-
-Agora responda à pergunta como a Specula:"""
+                # **PROMOT ADAPTADO PARA DEFICIENTES VISUAIS**
+                prompt = f"""# ESPECIFICAÇÕES DA SPECULA - ASSISTENTE PARA DEFICIENTES VISUAIS
+    
+    ## QUEM VOCÊ É:
+    Você é a Specula, uma assistente especializada em descrever ambientes para pessoas com deficiência visual. Você NUNCA pede para a   pessoa descrever o que está vendo.
+    
+    ## DADOS DETECTADOS NA IMAGEM ATUAL (COM POSIÇÕES E CONFIANÇAS):
+    {dados_texto}
+    
+    ## CONTEXTO DA PERGUNTA:
+    - Pergunta: "{pergunta}"
+    - Tipo: {"SOBRE A IMAGEM" if parece_sobre_imagem else "GERAL"}
+    - Usuário: Pessoa com deficiência visual
+    
+    ## REGRAS ABSOLUTAS - NUNCA FAÇA ISSO:
+    ❌ NUNCA peça para o usuário descrever o que está vendo
+    ❌ NUNCA diga "se você puder me dar mais detalhes"
+    ❌ NUNCA diga "se você puder descrever"
+    ❌ NUNCA diga "se você tiver mais informações"
+    ❌ NUNCA sugira que o usuário precisa ver algo
+    
+    ## COMO RESPONDER PARA DEFICIENTES VISUAIS:
+    
+    ### SE A PERGUNTA É SOBRE A IMAGEM (use os dados acima):
+    - Baseie-se APENAS nos dados detectados
+    - Use informações de posição (esquerda, direita, centro) quando disponível
+    - Mencione confiança da detecção quando relevante
+    - Se a pergunta for sobre algo não detectado: "Não estou detectando [objeto] nesta imagem"
+    - Se não tem dados suficientes: "Não estou conseguindo identificar [elemento] com clareza"
+    - Use descrições táteis/spaciais quando possível
+    
+    ### SE A PERGUNTA É GERAL:
+    - Responda naturalmente como assistente
+    - Seja útil e acolhedora
+    - Se não souber: "Não tenho essa informação no momento"
+    
+    ### TOM E ESTILO:
+    - Fale de forma clara e direta
+    - Use descrições objetivas
+    - Seja empática mas não condescendente
+    - Use pontos de referência espaciais
+    - Adicione emojis ocasionalmente para tom amigável
+    
+    ### EXEMPLOS DE RESPOSTAS ADEQUADAS:
+    - "Vejo uma pessoa no centro da imagem."
+    - "Não estou detectando cadeiras neste ambiente."
+    - "Há uma mesa à direita, a cerca de 2 metros de distância."
+    - "A imagem parece mostrar um ambiente interno bem iluminado."
+    
+    ### EXEMPLOS DE RESPOSTAS INADEQUADAS (EVITAR):
+    - "Se você puder descrever melhor..." ❌
+    - "Me dê mais detalhes..." ❌
+    - "O que você está vendo?" ❌
+    - "Descreva o ambiente para mim..." ❌
+    
+    IMPORTANTE: Você é a Specula, os olhos do usuário. Descreva o que está detectando sem nunca pedir ajuda visual ao usuário.
+    
+    Agora responda à pergunta:"""
                 
                 import openai
                 
@@ -321,7 +402,7 @@ Agora responda à pergunta como a Specula:"""
                         {"role": "system", "content": prompt},
                         {"role": "user", "content": pergunta}
                     ],
-                    max_tokens=200,
+                    max_tokens=300,
                     temperature=0.7,
                 )
                 
@@ -345,41 +426,41 @@ Agora responda à pergunta como a Specula:"""
                 
             except Exception as e:
                 logger.error(f"❌ Erro OpenAI na pergunta: {e}")
-                # Fallback para modo local
-                return self._responder_local(pergunta, contador_objetos, total_pessoas, faces_nomes, start_time)
+                # Fallback para modo local adaptado
+                return self._responder_local_adaptado(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados,   start_time)
         else:
-            # Modo local
-            return self._responder_local(pergunta, contador_objetos, total_pessoas, faces_nomes, start_time)
-
-    def _responder_local(self, pergunta, contador_objetos, total_pessoas, faces_nomes, start_time):
-        """Resposta local"""
+            # Modo local adaptado
+            return self._responder_local_adaptado(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados, start_time)
+    
+    def _responder_local_adaptado(self, pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados, start_time):
+        """Resposta local adaptada para deficientes visuais"""
         pergunta_lower = pergunta.lower()
         
-        # Respostas pré-definidas
+        # Respostas pré-definidas ADAPTADAS
         if 'oque é batata' in pergunta_lower or 'o que é batata' in pergunta_lower:
-            resposta = "🍠 A batata é um tubérculo comestível muito versátil! Pode ser frita, cozida, assada... É um alimento básico em muitas culturas!"
+            resposta = "🍠 A batata é um tubérculo comestível muito versátil! Pode ser frita, cozida, assada... É um alimento básico em     muitas culturas!"
             tipo = "geral"
         
         elif 'quem é você' in pergunta_lower:
-            resposta = "👋 Eu sou a Specula! Uma assistente criada para ajudar pessoas a entender melhor o ambiente através da análise de imagens."
+            resposta = "👋 Eu sou a Specula! Sou sua assistente visual, criada para ajudar a entender ambientes através da análise de   imagens."
             tipo = "geral"
         
         elif any(palavra in pergunta_lower for palavra in ['oi', 'olá', 'bom dia', 'boa tarde', 'boa noite']):
-            resposta = self._gerar_cumprimento()
+            resposta = self._gerar_cumprimento_adaptado()
             tipo = "geral"
         
         elif 'temperatura' in pergunta_lower:
-            resposta = "🌡️ No momento não tenho acesso a informações meteorológicas em tempo real. Mas posso te ajudar analisando imagens!"
+            resposta = "🌡️ Não tenho acesso a informações meteorológicas no momento. Mas posso te ajudar analisando imagens do ambiente!"
             tipo = "geral"
         
-        # Perguntas sobre imagem
-        elif any(palavra in pergunta_lower for palavra in ['imagem', 'foto', 'essa ', 'esta ', 'o que tem', 'descreva', 'quantas pessoas']):
+        # Perguntas sobre imagem - RESPOSTAS ADAPTADAS
+        elif any(palavra in pergunta_lower for palavra in ['imagem', 'foto', 'essa ', 'esta ', 'o que tem', 'descreva', 'quantas pessoas',  'onde está', 'tem ']):
             # Usar dados da imagem
-            resposta = self._gerar_resposta_sobre_imagem_local(pergunta, contador_objetos, total_pessoas, faces_nomes)
+            resposta = self._gerar_resposta_sobre_imagem_adaptada(pergunta, contador_objetos, total_pessoas, faces_nomes,   objetos_detalhados)
             tipo = "sobre_imagem"
         
         else:
-            resposta = "Olá! Sou a Specula. Como posso te ajudar com análise de imagens?"
+            resposta = "Olá! Sou a Specula, sua assistente visual. Como posso te ajudar com análise de imagens?"
             tipo = "geral"
         
         processing_time = time.time() - start_time
@@ -394,45 +475,98 @@ Agora responda à pergunta como a Specula:"""
             'correlacao_com_imagem': tipo == "sobre_imagem",
             'dados_utilizados': 'modo local'
         }
-
-    def _gerar_resposta_sobre_imagem_local(self, pergunta, contador_objetos, total_pessoas, faces_nomes):
-        """Resposta local sobre imagem"""
+    
+    def _gerar_resposta_sobre_imagem_adaptada(self, pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados):
+        """Resposta adaptada sobre imagem para deficientes visuais"""
         pergunta_lower = pergunta.lower()
         
         # Pessoas
         pessoas_yolo = contador_objetos.get('person', 0)
         total_detectado = max(total_pessoas, pessoas_yolo)
         
-        # Objetos
-        outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
-        objetos_pt = {self._traduzir_objeto(obj): qtd for obj, qtd in outros_objetos.items()}
+        # Objetos com detalhes
+        objetos_pt = {}
+        if objetos_detalhados:
+            for obj in objetos_detalhados:
+                nome = obj.get('name', '')
+                quantidade = obj.get('count', 1)
+                obj_pt = self._traduzir_objeto(nome)
+                objetos_pt[obj_pt] = objetos_pt.get(obj_pt, 0) + quantidade
         
-        # "Quantas pessoas?"
-        if 'quantas pessoas' in pergunta_lower:
+        # "O que tem nessa imagem?" ou "Descreva o ambiente"
+        if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'ambiente']):
             if total_detectado > 0:
                 if total_detectado == 1:
-                    return "Tem uma pessoa."
+                    base = "Na imagem, estou detectando uma pessoa."
                 elif total_detectado == 2:
-                    return "Tem duas pessoas."
+                    base = "Estou vendo duas pessoas."
                 else:
-                    return f"Tem {total_detectado} pessoas."
+                    base = f"Vejo {total_detectado} pessoas."
+                
+                if objetos_pt:
+                    objetos_lista = []
+                    for obj_pt, qtd in objetos_pt.items():
+                        if qtd == 1:
+                            artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
+                            objetos_lista.append(f"{artigo} {obj_pt}")
+                        else:
+                            objetos_lista.append(f"{qtd} {obj_pt}s")
+                    
+                    if objetos_lista:
+                        return f"{base} Também identifico {', '.join(objetos_lista)}."
+                
+                return base + " Não estou identificando outros objetos específicos."
+            elif objetos_pt:
+                primeiro = list(objetos_pt.items())[0]
+                obj_nome = primeiro[0]
+                qtd = primeiro[1]
+                
+                if qtd == 1:
+                    artigo = "uma" if obj_nome in ['bola', 'cadeira', 'mesa', 'planta'] else "um"
+                    return f"Estou detectando {artigo} {obj_nome}."
+                else:
+                    return f"Vejo {qtd} {obj_nome}s."
             else:
-                return "Não tem pessoas visíveis."
+                return "Não estou identificando elementos específicos nesta imagem no momento."
         
-        # "O que tem?" ou "Descreva"
-        elif any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva']):
-            return self._gerar_descricao_local(contador_objetos, total_pessoas, faces_nomes)
+        # "Quantas pessoas?"
+        elif 'quantas pessoas' in pergunta_lower:
+            if total_detectado > 0:
+                if total_detectado == 1:
+                    return "Estou detectando uma pessoa na imagem."
+                elif total_detectado == 2:
+                    return "Vejo duas pessoas."
+                else:
+                    return f"Identifico {total_detectado} pessoas."
+            else:
+                return "Não estou detectando pessoas nesta imagem."
         
         # "Tem [objeto]?"
         elif 'tem ' in pergunta_lower:
-            for objeto in ['cadeira', 'mesa', 'computador', 'tv', 'planta', 'carro']:
-                if objeto in pergunta_lower:
-                    tem_objeto = any(objeto in obj_pt.lower() for obj_pt in objetos_pt.keys())
-                    return f"{'Sim' if tem_objeto else 'Não'}, {'tem' if tem_objeto else 'não tem'} {objeto}."
+            for obj_pt in self.objetos_traduzidos.values():
+                if obj_pt in pergunta_lower:
+                    tem_objeto = obj_pt in objetos_pt
+                    if tem_objeto:
+                        quantidade = objetos_pt[obj_pt]
+                        if quantidade == 1:
+                            artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
+                            return f"Sim, estou detectando {artigo} {obj_pt}."
+                        else:
+                            return f"Sim, identifico {quantidade} {obj_pt}s."
+                    else:
+                        return f"Não, não estou detectando {obj_pt}."
         
-        # Resposta genérica
+        # "Esta foto parece ser interna ou externa?"
+        elif any(palavra in pergunta_lower for palavra in ['interna', 'externa', 'dentro', 'fora']):
+            # Baseado nos objetos detectados, tentar inferir
+            if 'person' in contador_objetos and len(contador_objetos) == 1:
+                return "Com base na detecção, parece ser um ambiente interno, mas não tenho certeza absoluta."
+            else:
+                return "Não tenho informações suficientes para determinar se é interno ou externo."
+        
+        # Resposta genérica adaptada
         if total_detectado > 0:
-            return f"Vejo {total_detectado} pessoa{'s' if total_detectado > 1 else ''} na imagem."
+            return f"Estou detectando {total_detectado} pessoa{'s' if total_detectado > 1 else ''} na imagem."
         elif objetos_pt:
             primeiro = list(objetos_pt.items())[0]
             obj_nome = primeiro[0]
@@ -440,50 +574,22 @@ Agora responda à pergunta como a Specula:"""
             
             if qtd == 1:
                 artigo = "uma" if obj_nome in ['bola', 'cadeira', 'mesa', 'planta'] else "um"
-                return f"Vejo {artigo} {obj_nome}."
+                return f"Identifico {artigo} {obj_nome}."
             else:
                 return f"Vejo {qtd} {obj_nome}s."
         else:
-            return "Não estou identificando elementos específicos nesta imagem."
-
-    def _verificar_pergunta_tempo(self, pergunta):
-        """Verifica pergunta sobre tempo"""
-        pergunta_lower = pergunta.lower()
-        
-        if any(palavra in pergunta_lower for palavra in ['que horas', 'que hora', 'horas são', 'hora é']):
-            try:
-                brasilia_tz = timezone(timedelta(hours=-3))
-                agora_brasilia = datetime.now(brasilia_tz)
-                hora_str = agora_brasilia.strftime("%H:%M")
-                return f"🕒 São {hora_str} (horário de Brasília)."
-            except:
-                agora = datetime.now()
-                hora_str = agora.strftime("%H:%M")
-                return f"🕒 São {hora_str}."
-        
-        elif any(palavra in pergunta_lower for palavra in ['que dia é hoje', 'qual a data', 'data de hoje']):
-            try:
-                brasilia_tz = timezone(timedelta(hours=-3))
-                agora_brasilia = datetime.now(brasilia_tz)
-                data_str = agora_brasilia.strftime("%d/%m/%Y")
-                return f"📅 Hoje é {data_str}."
-            except:
-                agora = datetime.now()
-                data_str = agora.strftime("%d/%m/%Y")
-                return f"📅 Hoje é {data_str}."
-        
-        return None
-
-    def _gerar_cumprimento(self):
-        """Gera cumprimento"""
+            return "Não estou conseguindo identificar elementos específicos nesta imagem."
+    
+    def _gerar_cumprimento_adaptado(self):
+        """Gera cumprimento adaptado"""
         hora = datetime.now().hour
         if 5 <= hora < 12:
-            return "☀️ Bom dia! Eu sou a Specula, sua assistente visual. Como posso te ajudar hoje?"
+            return "☀️ Bom dia! Eu sou a Specula, sua assistente visual. Estou pronta para descrever o ambiente para você!"
         elif 12 <= hora < 18:
-            return "🌤️ Boa tarde! Eu sou a Specula, pronta para te ajudar com análise de imagens. O que precisa?"
+            return "🌤️ Boa tarde! Sou a Specula, sua assistente para análise de ambientes. O que gostaria de saber?"
         else:
-            return "🌙 Boa noite! Sou a Specula, sua assistente visual. Como posso te ajudar nesta noite?"
-
+            return "🌙 Boa noite! Eu sou a Specula, pronta para ajudar você a entender o ambiente ao seu redor."
+    
     # ========== MÉTODOS AUXILIARES ==========
 
     def _contar_objetos(self, objetos_detectados):
