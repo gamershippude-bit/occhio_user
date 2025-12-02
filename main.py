@@ -1,12 +1,74 @@
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
-VERSÃO FINAL COM INTERPRETER CORRIGIDO
+VERSÃO FINAL COM OPENAI v1.x FIX
 """
 
+# ================== FIX OPENAI PROXIES ISSUE ==================
+import os
+import sys
+
+# 1. REMOVER variáveis de proxy do ambiente (Cloud Run adiciona automaticamente)
+proxy_env_vars = [
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 
+    'http_proxy', 'https_proxy', 'all_proxy',
+    'OPENAI_PROXY', 'OPENAI_BASE_URL'  # OpenAI-specific
+]
+
+for var in proxy_env_vars:
+    if var in os.environ:
+        print(f"⚠️ Removendo variável de ambiente {var}: {os.environ[var]}")
+        os.environ.pop(var, None)
+
+# 2. MONKEY PATCH para garantir que proxies não seja passado
+try:
+    import openai
+    
+    if hasattr(openai, 'OpenAI'):
+        original_init = openai.OpenAI.__init__
+        
+        def patched_init(self, *args, **kwargs):
+            # Debug: ver o que está sendo passado
+            if kwargs:
+                print(f"🔧 OpenAI.__init__ recebeu: {list(kwargs.keys())}")
+            
+            # Remover proxies explicitamente
+            if 'proxies' in kwargs:
+                print(f"🚨 REMOVENDO 'proxies': {kwargs['proxies']}")
+                kwargs.pop('proxies')
+            
+            # Garantir que temos apenas parâmetros válidos
+            valid_params = ['api_key', 'base_url', 'timeout', 'max_retries', 
+                           'default_headers', 'default_query', 'http_client']
+            
+            # Filtrar parâmetros inválidos
+            invalid_keys = [k for k in kwargs.keys() if k not in valid_params]
+            for key in invalid_keys:
+                print(f"⚠️ Removendo parâmetro inválido: {key}")
+                kwargs.pop(key, None)
+            
+            # Chamar original com parâmetros limpos
+            return original_init(self, *args, **kwargs)
+        
+        openai.OpenAI.__init__ = patched_init
+        print("✅ OpenAI v1.x patch aplicado com sucesso")
+        
+except Exception as e:
+    print(f"⚠️ Erro no patch OpenAI: {e}")
+
+# 3. VERIFICAÇÃO FINAL
+print(f"📦 Python: {sys.version}")
+print(f"📦 OpenAI version: ", end="")
+try:
+    import openai
+    print(openai.__version__)
+except:
+    print("N/A")
+print("=" * 50)
+
+# ================== IMPORTS ORIGINAIS ==================
 import cv2
 import logging
 import time
-import os
 import numpy as np
 import threading
 import traceback

@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO FINAL COM OPENAI CORRIGIDO
+Interpreter - VERSÃO FINAL COM OPENAI v1.x FIX
 """
 
 import logging
@@ -32,34 +32,45 @@ class Interpreter:
             else:
                 logger.warning("⚠️ API key não começa com 'sk-', tentando mesmo assim")
             
-            # TENTAR IMPORTAR E CONFIGURAR OPENAI
+            # TENTAR IMPORTAR E CONFIGURAR OPENAI COM SEGURANÇA
             try:
                 logger.info("🔄 Importando biblioteca OpenAI...")
                 from openai import OpenAI
                 
                 logger.info("🔄 Configurando cliente OpenAI...")
-                self.client = OpenAI(api_key=api_key)
                 
-                # TESTAR A CONEXÃO
-                logger.info("🧪 Testando conexão com OpenAI...")
-                try:
-                    # Teste simples - listar modelos
-                    models = self.client.models.list(limit=1)
-                    logger.info(f"✅ OpenAI CONECTADO COM SUCESSO!")
-                    logger.info(f"✅ Modelo padrão: {self.model_name}")
-                    
-                except Exception as test_e:
-                    logger.error(f"❌ Teste de conexão falhou: {test_e}")
-                    logger.warning("⚠️ Usando modo local devido a erro de conexão")
-                    self.client = None
-                    
+                # DEBUG: Verificar se há proxies nas variáveis de ambiente
+                for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy']:
+                    if var in os.environ:
+                        logger.warning(f"⚠️ Variável de ambiente {var} encontrada: {os.environ[var]}")
+                
+                # Criação SEGURA do cliente - método robusto
+                self.client = self._create_openai_client_safely(api_key)
+                
+                if self.client:
+                    # TESTAR A CONEXÃO
+                    logger.info("🧪 Testando conexão com OpenAI...")
+                    try:
+                        # Teste simples - listar modelos
+                        models = self.client.models.list(limit=1)
+                        logger.info(f"✅ OpenAI CONECTADO COM SUCESSO!")
+                        logger.info(f"✅ Modelo padrão: {self.model_name}")
+                        
+                    except Exception as test_e:
+                        logger.error(f"❌ Teste de conexão falhou: {test_e}")
+                        logger.warning("⚠️ Usando modo local devido a erro de conexão")
+                        self.client = None
+                else:
+                    logger.warning("⚠️ Não foi possível criar cliente OpenAI")
+                        
             except ImportError as e:
                 logger.error(f"❌ Biblioteca 'openai' não instalada: {e}")
                 logger.error("❌ Execute: pip install openai")
                 self.client = None
             except Exception as e:
                 logger.error(f"❌ Erro ao configurar OpenAI: {str(e)[:200]}")
-                self.client = None
+                logger.info("🔄 Tentando método alternativo...")
+                self.client = self._try_alternative_openai_connection(api_key)
         else:
             logger.warning("⚠️ Nenhuma API key válida recebida")
             logger.warning("⚠️ Usando MODO LOCAL")
@@ -90,6 +101,90 @@ class Interpreter:
             'clock': 'relógio',
             'vase': 'vaso'
         }
+
+    def _create_openai_client_safely(self, api_key):
+        """Cria cliente OpenAI de forma segura, evitando problemas com proxies"""
+        try:
+            from openai import OpenAI
+            
+            # Método 1: Criar com apenas os parâmetros essenciais
+            try:
+                # Verificar assinatura do construtor
+                import inspect
+                sig = inspect.signature(OpenAI.__init__)
+                valid_params = list(sig.parameters.keys())[1:]  # Excluir 'self'
+                logger.info(f"🔍 Parâmetros válidos do OpenAI.__init__: {valid_params}")
+                
+                # Criar apenas com api_key (mínimo necessário)
+                client_kwargs = {'api_key': api_key}
+                
+                # Filtrar para ter apenas parâmetros válidos
+                filtered_kwargs = {k: v for k, v in client_kwargs.items() if k in valid_params}
+                logger.info(f"🔍 Criando cliente com parâmetros filtrados: {list(filtered_kwargs.keys())}")
+                
+                return OpenAI(**filtered_kwargs)
+                
+            except TypeError as e:
+                # Se falhar, tentar método mais agressivo
+                logger.warning(f"⚠️ Método 1 falhou: {e}")
+                return self._create_openai_client_aggressive(api_key)
+                
+        except Exception as e:
+            logger.error(f"❌ Erro na criação segura do cliente: {e}")
+            return None
+
+    def _create_openai_client_aggressive(self, api_key):
+        """Método agressivo para criar cliente OpenAI, removendo TODOS os proxies"""
+        try:
+            from openai import OpenAI
+            
+            # Salvar e remover variáveis de ambiente de proxy
+            original_env = {}
+            proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 
+                         'http_proxy', 'https_proxy', 'all_proxy']
+            
+            for var in proxy_vars:
+                if var in os.environ:
+                    original_env[var] = os.environ[var]
+                    del os.environ[var]
+                    logger.info(f"🔄 Removido {var} do ambiente temporariamente")
+            
+            try:
+                # Tentar criar cliente sem interferências
+                client = OpenAI(api_key=api_key)
+                logger.info("✅ Cliente criado com método agressivo")
+                return client
+            finally:
+                # Restaurar variáveis
+                for var, value in original_env.items():
+                    os.environ[var] = value
+                    
+        except Exception as e:
+            logger.error(f"❌ Método agressivo também falhou: {e}")
+            return None
+
+    def _try_alternative_openai_connection(self, api_key):
+        """Método alternativo de conexão"""
+        try:
+            # Tentar via httpx client customizado
+            import httpx
+            from openai import OpenAI
+            
+            # Criar cliente HTTP sem proxies
+            http_client = httpx.Client()
+            
+            # Criar OpenAI client com http_client customizado
+            client = OpenAI(
+                api_key=api_key,
+                http_client=http_client
+            )
+            
+            logger.info("✅ Cliente criado via httpx customizado")
+            return client
+            
+        except Exception as e:
+            logger.error(f"❌ Método alternativo falhou: {e}")
+            return None
 
     # ========== MÉTODO PARA /processar ==========
 
