@@ -1,72 +1,18 @@
 """
 Occhio - Sistema de Visão Computacional para Deficientes Visuais
-VERSÃO FINAL COM OPENAI v1.x FIX
+VERSÃO FINAL COM OPENAI 0.28.1
 """
 
-# ================== FIX OPENAI PROXIES ISSUE ==================
+# ================== CONFIGURAÇÃO SIMPLES ==================
 import os
-import sys
 
-print("🚀 INICIANDO OCCHIO CLOUD COM FIX DEFINITIVO")
-print("=" * 60)
-
-# 1. REMOVER COMPLETAMENTE todas as variáveis de proxy
-proxy_env_vars = [
-    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 
-    'http_proxy', 'https_proxy', 'all_proxy',
-    'OPENAI_PROXY', 'OPENAI_BASE_URL',
-    'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
-    'NO_PROXY', 'no_proxy'
-]
-
-for var in proxy_env_vars:
+# Limpar variáveis de proxy do ambiente
+for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy']:
     if var in os.environ:
-        print(f"⚠️ REMOVENDO variável de ambiente: {var}")
+        print(f"⚠️ Removendo variável de ambiente {var}")
         os.environ.pop(var, None)
 
-# 2. PATCH ULTRA AGRESSIVO para OpenAI
-try:
-    import openai
-    
-    print(f"📦 OpenAI version: {openai.__version__}")
-    
-    # Verificar se é versão problemática
-    if openai.__version__.startswith('1.0.') or openai.__version__.startswith('1.1.') or openai.__version__.startswith('1.2.') or openai.__version__.startswith('1.3.'):
-        print(f"🚨 VERSÃO PROBLEMÁTICA: {openai.__version__}")
-        print("🚨 Recomendado: pip install openai>=1.30.0")
-    
-    if hasattr(openai, 'OpenAI'):
-        original_init = openai.OpenAI.__init__
-        
-        def patched_init(self, *args, **kwargs):
-            # Debug detalhado
-            print(f"🔧 OpenAI.__init__ chamado com:")
-            print(f"   args: {args}")
-            print(f"   kwargs keys: {list(kwargs.keys())}")
-            
-            # Remover ABSOLUTAMENTE TUDO que não seja api_key
-            clean_kwargs = {}
-            
-            # Apenas api_key é permitido
-            if 'api_key' in kwargs:
-                clean_kwargs['api_key'] = kwargs['api_key']
-                print(f"✅ Mantendo api_key")
-            
-            # Remover TUDO mais
-            for key in list(kwargs.keys()):
-                if key != 'api_key':
-                    print(f"🚨 REMOVENDO completamente: {key}")
-            
-            # Chamar original com APENAS api_key
-            return original_init(self, *args, **clean_kwargs)
-        
-        openai.OpenAI.__init__ = patched_init
-        print("✅ PATCH ULTRA AGRESSIVO aplicado: permitindo apenas api_key")
-        
-except Exception as e:
-    print(f"⚠️ Erro no patch OpenAI: {e}")
-
-print(f"📦 Python: {sys.version}")
+print("🚀 Occhio Cloud iniciando com OpenAI 0.28.1")
 print("=" * 60)
 
 # ================== IMPORTS ORIGINAIS ==================
@@ -183,16 +129,16 @@ class OcchioCloud:
             self.interpreter = Interpreter(api_key=self.api_key)
             
             # Verificar estado do interpreter
-            if hasattr(self.interpreter, 'client'):
-                if self.interpreter.client is not None:
+            if hasattr(self.interpreter, 'openai_available'):
+                if self.interpreter.openai_available:
                     logger.info("✅ Interpreter OpenAI inicializado com sucesso!")
                     # Confirmar que OpenAI está disponível
                     self.openai_available = True
                 else:
-                    logger.warning("⚠️ Interpreter está em modo local (client=None)")
+                    logger.warning("⚠️ Interpreter está em modo local")
                     self.openai_available = False
             else:
-                logger.error("❌ Interpreter não tem atributo 'client'")
+                logger.error("❌ Interpreter não tem atributo 'openai_available'")
                 self.openai_available = False
                 
         except Exception as e:
@@ -236,7 +182,7 @@ class OcchioCloud:
         """Cria um interpreter local básico"""
         class InterpreterLocal:
             def __init__(self):
-                self.client = None
+                self.openai_available = False
             
             def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
                 return "Olá! Sou a Specula, sua assistente visual."
@@ -547,7 +493,7 @@ def index():
         "version": "4.0.0",
         "status": "online",
         "timestamp": time.time(),
-        "features": "YOLO + Specula AI",
+        "features": "YOLO + Specula AI (OpenAI 0.28.1)",
         "endpoints": {
             "/": "GET - Esta página",
             "/health": "GET - Health check",
@@ -618,8 +564,7 @@ def debug_interpreter():
             'interpreter_type': type(occhio.interpreter).__name__,
             'openai_available': occhio.openai_available,
             'api_key_configured': bool(occhio.api_key),
-            'interpreter_has_client': hasattr(occhio.interpreter, 'client') and occhio.interpreter.client is not None,
-            'interpreter_client_type': type(occhio.interpreter.client).__name__ if hasattr(occhio.interpreter, 'client') and occhio.interpreter.client else None,
+            'interpreter_has_client': hasattr(occhio.interpreter, 'openai_available') and occhio.interpreter.openai_available,
             'timestamp': time.time()
         }
         

@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO DEFINITIVA COM OPENAI v1.x
+Interpreter - VERSÃO COMPLETA COM OPENAI 0.28.1
 """
 
 import logging
@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 class Interpreter:
     def __init__(self, model_name="gpt-4o-mini", api_key=None):
         self.model_name = model_name
-        self.client = None
+        self.openai_available = False
         
         # LOG DE INICIALIZAÇÃO DETALHADO
         logger.info("=" * 60)
-        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO DEFINITIVA")
+        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO COMPLETA")
         logger.info("=" * 60)
         
         # Verificar API key
@@ -32,96 +32,52 @@ class Interpreter:
             else:
                 logger.warning("⚠️ API key não começa com 'sk-', tentando mesmo assim")
             
-            # TENTAR IMPORTAR E CONFIGURAR OPENAI COM SOLUÇÃO DEFINITIVA
+            # TENTAR IMPORTAR E CONFIGURAR OPENAI 0.28.1
             try:
                 logger.info("🔄 Importando biblioteca OpenAI...")
-                from openai import OpenAI
+                import openai
                 
-                # SOLUÇÃO DEFINITIVA: Criar cliente usando APENAS kwargs válidos
-                logger.info("🔄 Configurando cliente OpenAI (método definitivo)...")
+                # Verificar versão
+                logger.info(f"📦 Versão OpenAI: {openai.__version__}")
                 
-                # Método 100% garantido - usar inspect para pegar assinatura correta
-                import inspect
+                # Configurar API key (forma antiga da 0.28.1)
+                openai.api_key = api_key
                 
-                # Obter assinatura REAL do construtor
-                sig = inspect.signature(OpenAI.__init__)
-                logger.info(f"🔍 Assinatura REAL do OpenAI.__init__: {sig}")
-                
-                # Criar dicionário APENAS com parâmetros válidos
-                valid_params = list(sig.parameters.keys())
-                
-                # Parâmetros que SEMPRE são válidos em qualquer versão da OpenAI v1.x
-                safe_params = {
-                    'api_key': api_key,
-                    # Não adicionar NADA mais
-                }
-                
-                # Filtrar para ter apenas parâmetros que existem na assinatura
-                filtered_params = {}
-                for key, value in safe_params.items():
-                    if key in valid_params:
-                        filtered_params[key] = value
-                    else:
-                        logger.warning(f"⚠️ Parâmetro {key} não existe na versão atual da OpenAI")
-                
-                logger.info(f"🔍 Criando cliente com parâmetros: {list(filtered_params.keys())}")
-                
-                # IMPORTANTE: Verificar se 'proxies' NÃO está nos parâmetros
-                if 'proxies' in filtered_params:
-                    logger.error("🚨 PROXIES ainda está nos parâmetros! Removendo...")
-                    del filtered_params['proxies']
-                
-                # Método ULTRA seguro: passar argumentos por posição
+                # TESTAR A CONEXÃO
+                logger.info("🧪 Testando conexão com OpenAI...")
                 try:
-                    # Tentar criar com apenas api_key
-                    self.client = OpenAI(api_key=api_key)
-                    logger.info("✅ OpenAI cliente criado (método simples)")
-                except Exception as e1:
-                    logger.warning(f"⚠️ Método simples falhou: {e1}")
+                    # Teste simples - fazer uma chamada pequena
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo",
+                        messages=[{"role": "user", "content": "Teste de conexão"}],
+                        max_tokens=5
+                    )
                     
-                    # Método de fallback: criar sem nenhum parâmetro e depois configurar
-                    try:
-                        self.client = OpenAI()
-                        # Configurar API key depois
-                        self.client.api_key = api_key
-                        logger.info("✅ OpenAI cliente criado (método fallback)")
-                    except Exception as e2:
-                        logger.error(f"❌ Método fallback também falhou: {e2}")
-                        self.client = None
-                
-                if self.client:
-                    # TESTAR A CONEXÃO
-                    logger.info("🧪 Testando conexão com OpenAI...")
-                    try:
-                        # Teste simples
-                        models = self.client.models.list(limit=1)
-                        logger.info(f"✅ OpenAI CONECTADO COM SUCESSO!")
-                        logger.info(f"✅ Modelo padrão: {self.model_name}")
-                        logger.info(f"✅ Versão OpenAI: {self.client._version}")
-                        
-                    except Exception as test_e:
-                        logger.error(f"❌ Teste de conexão falhou: {test_e}")
-                        logger.warning("⚠️ Usando modo local devido a erro de conexão")
-                        self.client = None
-                else:
-                    logger.warning("⚠️ Não foi possível criar cliente OpenAI")
-                        
+                    logger.info(f"✅ OpenAI CONECTADO COM SUCESSO!")
+                    logger.info(f"✅ Modelo padrão: {self.model_name}")
+                    self.openai_available = True
+                    
+                except Exception as test_e:
+                    logger.error(f"❌ Teste de conexão falhou: {test_e}")
+                    logger.warning("⚠️ Usando modo local devido a erro de conexão")
+                    self.openai_available = False
+                    
             except ImportError as e:
                 logger.error(f"❌ Biblioteca 'openai' não instalada: {e}")
-                logger.error("❌ Execute: pip install openai")
-                self.client = None
+                logger.error("❌ Execute: pip install openai==0.28.1")
+                self.openai_available = False
             except Exception as e:
-                logger.error(f"❌ Erro ao configurar OpenAI: {str(e)}")
-                self.client = None
+                logger.error(f"❌ Erro ao configurar OpenAI: {str(e)[:200]}")
+                self.openai_available = False
         else:
             logger.warning("⚠️ Nenhuma API key válida recebida")
             logger.warning("⚠️ Usando MODO LOCAL")
-            self.client = None
+            self.openai_available = False
         
-        logger.info(f"🎯 Estado final do Interpreter: {'OPENAI ATIVO' if self.client else 'MODO LOCAL'}")
+        logger.info(f"🎯 Estado final do Interpreter: {'OPENAI ATIVO' if self.openai_available else 'MODO LOCAL'}")
         logger.info("=" * 60)
         
-        # Dicionário de tradução (mantém o mesmo)
+        # Dicionário de tradução
         self.objetos_traduzidos = {
             'person': 'pessoa',
             'chair': 'cadeira', 
@@ -144,92 +100,6 @@ class Interpreter:
             'vase': 'vaso'
         }
 
-    # ... resto do código mantido igual ...
-
-    def _create_openai_client_safely(self, api_key):
-        """Cria cliente OpenAI de forma segura, evitando problemas com proxies"""
-        try:
-            from openai import OpenAI
-            
-            # Método 1: Criar com apenas os parâmetros essenciais
-            try:
-                # Verificar assinatura do construtor
-                import inspect
-                sig = inspect.signature(OpenAI.__init__)
-                valid_params = list(sig.parameters.keys())[1:]  # Excluir 'self'
-                logger.info(f"🔍 Parâmetros válidos do OpenAI.__init__: {valid_params}")
-                
-                # Criar apenas com api_key (mínimo necessário)
-                client_kwargs = {'api_key': api_key}
-                
-                # Filtrar para ter apenas parâmetros válidos
-                filtered_kwargs = {k: v for k, v in client_kwargs.items() if k in valid_params}
-                logger.info(f"🔍 Criando cliente com parâmetros filtrados: {list(filtered_kwargs.keys())}")
-                
-                return OpenAI(**filtered_kwargs)
-                
-            except TypeError as e:
-                # Se falhar, tentar método mais agressivo
-                logger.warning(f"⚠️ Método 1 falhou: {e}")
-                return self._create_openai_client_aggressive(api_key)
-                
-        except Exception as e:
-            logger.error(f"❌ Erro na criação segura do cliente: {e}")
-            return None
-
-    def _create_openai_client_aggressive(self, api_key):
-        """Método agressivo para criar cliente OpenAI, removendo TODOS os proxies"""
-        try:
-            from openai import OpenAI
-            
-            # Salvar e remover variáveis de ambiente de proxy
-            original_env = {}
-            proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 
-                         'http_proxy', 'https_proxy', 'all_proxy']
-            
-            for var in proxy_vars:
-                if var in os.environ:
-                    original_env[var] = os.environ[var]
-                    del os.environ[var]
-                    logger.info(f"🔄 Removido {var} do ambiente temporariamente")
-            
-            try:
-                # Tentar criar cliente sem interferências
-                client = OpenAI(api_key=api_key)
-                logger.info("✅ Cliente criado com método agressivo")
-                return client
-            finally:
-                # Restaurar variáveis
-                for var, value in original_env.items():
-                    os.environ[var] = value
-                    
-        except Exception as e:
-            logger.error(f"❌ Método agressivo também falhou: {e}")
-            return None
-
-    def _try_alternative_openai_connection(self, api_key):
-        """Método alternativo de conexão"""
-        try:
-            # Tentar via httpx client customizado
-            import httpx
-            from openai import OpenAI
-            
-            # Criar cliente HTTP sem proxies
-            http_client = httpx.Client()
-            
-            # Criar OpenAI client com http_client customizado
-            client = OpenAI(
-                api_key=api_key,
-                http_client=http_client
-            )
-            
-            logger.info("✅ Cliente criado via httpx customizado")
-            return client
-            
-        except Exception as e:
-            logger.error(f"❌ Método alternativo falhou: {e}")
-            return None
-
     # ========== MÉTODO PARA /processar ==========
 
     def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
@@ -240,13 +110,15 @@ class Interpreter:
         contador_objetos = self._contar_objetos(objetos_detectados)
         total_pessoas = len(faces_nomes or [])
         
-        # Se temos OpenAI client, usar IA
-        if self.client:
+        # Se temos OpenAI disponível, usar IA
+        if self.openai_available:
             try:
                 # Preparar dados para o prompt
                 dados_texto = self._formatar_dados_para_prompt(contador_objetos, total_pessoas, faces_nomes)
                 
-                response = self.client.chat.completions.create(
+                import openai
+                
+                response = openai.ChatCompletion.create(
                     model=self.model_name,
                     messages=[
                         {
@@ -393,8 +265,8 @@ Responda naturalmente:"""
         contador_objetos = self._contar_objetos(objetos_detectados)
         total_pessoas = len(faces_nomes or [])
         
-        # Se temos OpenAI client, usar IA inteligente
-        if self.client:
+        # Se temos OpenAI disponível, usar IA inteligente
+        if self.openai_available:
             try:
                 # Preparar dados
                 dados_texto = self._formatar_dados_para_prompt(contador_objetos, total_pessoas, faces_nomes)
@@ -441,7 +313,9 @@ Você é a Specula, uma assistente amigável, empática e útil.
 
 Agora responda à pergunta como a Specula:"""
                 
-                response = self.client.chat.completions.create(
+                import openai
+                
+                response = openai.ChatCompletion.create(
                     model=self.model_name,
                     messages=[
                         {"role": "system", "content": prompt},
