@@ -1,5 +1,5 @@
 """
-Interpreter - VERSÃO COMPLETA COM OPENAI 0.28.1 - ADAPTADA PARA DEFICIENTES VISUAIS
+Interpreter - VERSÃO HIPER-RESTRITIVA - SEM INVENÇÕES
 """
 
 import logging
@@ -17,7 +17,7 @@ class Interpreter:
         
         # LOG DE INICIALIZAÇÃO DETALHADO
         logger.info("=" * 60)
-        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO COMPLETA")
+        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO HIPER-RESTRITIVA")
         logger.info("=" * 60)
         
         # Verificar API key
@@ -108,7 +108,7 @@ class Interpreter:
     # ========== MÉTODO PARA /processar ==========
 
     def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
-        """Gera descrição natural - ADAPTADA PARA DEFICIENTES VISUAIS"""
+        """Gera descrição natural - HIPER RESTRITIVA"""
         logger.info("🌄 Gerando descrição natural")
         
         # Preparar dados
@@ -118,8 +118,8 @@ class Interpreter:
         # Se temos OpenAI disponível, usar IA
         if self.openai_available:
             try:
-                # Preparar dados para o prompt - VERSÃO ADAPTADA
-                dados_texto = self._formatar_dados_para_prompt(
+                # Preparar dados para o prompt - VERSÃO HIPER RESTRITIVA
+                dados_texto = self._formatar_dados_para_prompt_restritivo(
                     contador_objetos, 
                     total_pessoas, 
                     faces_nomes,
@@ -133,115 +133,112 @@ class Interpreter:
                     messages=[
                         {
                             "role": "system",
-                            "content": f"""Você é a Specula, uma assistente especializada em descrever ambientes para pessoas com deficiência visual.
+                            "content": f"""# ESPECIFICAÇÕES DA SPECULA - VERSÃO HIPER RESTRITIVA
 
-DADOS DETECTADOS NA IMAGEM:
+## SUA FUNÇÃO:
+Você é a Specula, uma assistente que APENAS repete os dados detectados. Você NÃO inventa, NÃO adiciona, NÃO interpreta.
+
+## DADOS DETECTADOS (APENAS ESTES):
 {dados_texto}
 
-REGRAS IMPORTANTES PARA DEFICIENTES VISUAIS:
-1. NUNCA peça para o usuário descrever algo
-2. NUNCA diga "se você puder me dar mais detalhes"
-3. Baseie-se APENAS nos dados detectados
-4. Use informações de posição quando disponível
-5. Seja clara e direta nas descrições
-6. Use pontos de referência espaciais
-7. NUNCA mencione porcentagens ou confianças das detecções
+## REGRAS ABSOLUTAS - NUNCA FAÇA:
+❌ NUNCA invente posições (esquerda, direita, centro)
+❌ NUNCA invente quantidades diferentes das fornecidas
+❌ NUNCA invente objetos não listados
+❌ NUNCA use "parece", "aparenta", "talvez", "provavelmente"
+❌ NUNCA faça suposições sobre ambiente (interno/externo)
+❌ NUNCA mencione confianças ou porcentagens
+❌ NUNCA peça para o usuário descrever algo
 
-EXEMPLOS ADEQUADOS:
-- "Estou detectando uma pessoa no centro da imagem."
-- "Vejo uma cadeira à direita."
-- "Não estou identificando objetos específicos no momento."
+## COMO RESPONDER:
+1. Se tem dados: Diga APENAS o que está nos dados
+2. Se não tem dados: "Não estou detectando elementos específicos"
+3. Use frases curtas e diretas
+4. Não adicione interpretações
 
-EXEMPLOS INADEQUADOS (NUNCA USE):
-- "Se você puder descrever melhor..." ❌
-- "Me dê mais detalhes sobre..." ❌
-- "O que você está vendo?" ❌
-- "Com 80% de confiança..." ❌
-- "A detecção tem 90% de certeza..." ❌
+## EXEMPLOS CORRETOS:
+- Se dados são "1 pessoa": "Estou detectando uma pessoa."
+- Se dados são "2 pessoas, 1 cadeira": "Estou detectando duas pessoas e uma cadeira."
+- Se dados são "Nenhum objeto ou pessoa detectado": "Não estou detectando elementos específicos."
 
-Descreva o ambiente baseado nos dados acima:"""
+## EXEMPLOS INCORRETOS:
+- "Uma pessoa à esquerda" ❌ (inventou posição)
+- "Parece ter duas pessoas" ❌ (usou "parece")
+- "Talvez seja um ambiente interno" ❌ (fez suposição)
+- "Provavelmente há uma mesa" ❌ (inventou objeto)
+
+Responda APENAS com base nos dados acima:"""
                         },
                         {"role": "user", "content": "Descreva o ambiente que estou vendo:"}
                     ],
-                    max_tokens=150,
-                    temperature=0.5,
+                    max_tokens=100,  # MENOS tokens para evitar invenções
+                    temperature=0.3,  # TEMPERATURA BAIXA para menos criatividade
                 )
                 
-                return response.choices[0].message.content.strip()
+                resposta = response.choices[0].message.content.strip()
+                
+                # VALIDAÇÃO EXTRA: Verificar se resposta não inventou nada
+                resposta_validada = self._validar_resposta_contra_dados(resposta, contador_objetos, total_pessoas)
+                
+                return resposta_validada
                 
             except Exception as e:
                 logger.error(f"❌ Erro OpenAI na descrição: {e}")
-                # Fallback para modo local adaptado
-                return self._gerar_descricao_local_adaptada(contador_objetos, total_pessoas, faces_nomes, objetos_detectados)
+                # Fallback para modo local
+                return self._gerar_descricao_local_restritiva(contador_objetos, total_pessoas, faces_nomes, objetos_detectados)
         else:
-            # Modo local adaptado
-            return self._gerar_descricao_local_adaptada(contador_objetos, total_pessoas, faces_nomes, objetos_detectados)
+            # Modo local
+            return self._gerar_descricao_local_restritiva(contador_objetos, total_pessoas, faces_nomes, objetos_detectados)
 
-    def _gerar_descricao_local_adaptada(self, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados=None):
-        """Descrição local adaptada para deficientes visuais"""
-        partes = []
-        
+    def _gerar_descricao_local_restritiva(self, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados=None):
+        """Descrição local restritiva"""
         # Pessoas
         pessoas_yolo = contador_objetos.get('person', 0)
         total_detectado = max(total_pessoas, pessoas_yolo)
         
-        if total_detectado > 0:
-            if faces_nomes and any(n != 'Desconhecido' for n in faces_nomes):
-                conhecidas = [n for n in faces_nomes if n != 'Desconhecido']
-                if len(conhecidas) == 1:
-                    partes.append(f"o {conhecidas[0]}")
-                else:
-                    partes.append(f"o {', '.join(conhecidas[:-1])} e o {conhecidas[-1]}")
-            else:
-                if total_detectado == 1:
-                    partes.append("uma pessoa")
-                elif total_detectado == 2:
-                    partes.append("duas pessoas")
-                else:
-                    partes.append(f"{total_detectado} pessoas")
-        
-        # Objetos com detalhes se disponível
+        # Objetos
+        objetos_lista = []
         if objetos_detalhados:
+            objetos_agrupados = {}
             for obj in objetos_detalhados:
                 nome = obj.get('name', '')
                 quantidade = obj.get('count', 1)
-                
-                obj_pt = self._traduzir_objeto(nome)
-                
-                if quantidade == 1:
-                    artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
-                    partes.append(f"{artigo} {obj_pt}")
-                else:
-                    partes.append(f"{quantidade} {obj_pt}s")
-        
-        # Fallback para contador simples
-        elif contador_objetos:
-            outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
-            if outros_objetos:
-                for obj_ingles, quantidade in outros_objetos.items():
-                    obj_pt = self._traduzir_objeto(obj_ingles)
-                    
+                if nome not in objetos_agrupados:
+                    objetos_agrupados[nome] = 0
+                objetos_agrupados[nome] += quantidade
+            
+            for nome_ingles, quantidade in objetos_agrupados.items():
+                if nome_ingles != 'person':  # Pessoas já tratamos separadamente
+                    nome_pt = self._traduzir_objeto(nome_ingles)
                     if quantidade == 1:
-                        artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
-                        partes.append(f"{artigo} {obj_pt}")
+                        objetos_lista.append(f"1 {nome_pt}")
                     else:
-                        partes.append(f"{quantidade} {obj_pt}s")
+                        objetos_lista.append(f"{quantidade} {nome_pt}s")
+        
+        # Montar resposta
+        partes = []
+        
+        if total_detectado > 0:
+            if total_detectado == 1:
+                partes.append("1 pessoa")
+            else:
+                partes.append(f"{total_detectado} pessoas")
+        
+        if objetos_lista:
+            partes.extend(objetos_lista)
         
         if not partes:
-            return "Olá, sou a Specula. Não estou identificando elementos específicos nesta imagem no momento."
-        
-        inicios = ["Estou detectando ", "Na imagem, vejo ", "Identifico ", "Estou vendo "]
-        inicio = random.choice(inicios)
+            return "Não estou detectando elementos específicos."
         
         if len(partes) == 1:
-            return f"{inicio}{partes[0]}."
+            return f"Estou detectando {partes[0]}."
         else:
-            return f"{inicio}{', '.join(partes[:-1])} e {partes[-1]}."
+            return f"Estou detectando {', '.join(partes[:-1])} e {partes[-1]}."
 
     # ========== MÉTODO PRINCIPAL PARA /perguntar ==========
 
     def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Responde perguntas - VERSÃO ADAPTADA PARA DEFICIENTES VISUAIS"""
+        """Responde perguntas - VERSÃO HIPER RESTRITIVA"""
         logger.info(f"💬 Processando pergunta: '{pergunta}'")
         
         start_time = time.time()
@@ -277,7 +274,7 @@ Descreva o ambiente baseado nos dados acima:"""
         if self.openai_available:
             try:
                 # Preparar dados DETALHADOS para o prompt
-                dados_texto = self._formatar_dados_para_prompt(
+                dados_texto = self._formatar_dados_para_prompt_restritivo(
                     contador_objetos, 
                     total_pessoas, 
                     faces_nomes,
@@ -297,66 +294,47 @@ Descreva o ambiente baseado nos dados acima:"""
                     'quantos ', 'tem alguma', 'há alguma', 'ambiente', 'cena', 'cenário'
                 ])
                 
-                # **PROMOT ADAPTADO PARA DEFICIENTES VISUAIS**
-                prompt = f"""# ESPECIFICAÇÕES DA SPECULA - ASSISTENTE PARA DEFICIENTES VISUAIS
+                # **PROMOT HIPER RESTRITIVO**
+                prompt = f"""# ESPECIFICAÇÕES DA SPECULA - VERSÃO HIPER RESTRITIVA
 
-## QUEM VOCÊ É:
-Você é a Specula, uma assistente especializada em descrever ambientes para pessoas com deficiência visual. Você NUNCA pede para a pessoa descrever o que está vendo.
+## SUA FUNÇÃO:
+Você é a Specula, uma assistente que APENAS usa os dados detectados. NÃO invente, NÃO adicione, NÃO interprete.
 
-## DADOS DETECTADOS NA IMAGEM ATUAL:
+## DADOS DETECTADOS (APENAS ESTES - NADA MAIS):
 {dados_texto}
 
-## CONTEXTO DA PERGUNTA:
-- Pergunta: "{pergunta}"
-- Tipo: {"SOBRE A IMAGEM" if parece_sobre_imagem else "GERAL"}
-- Usuário: Pessoa com deficiência visual
+## PERGUNTA DO USUÁRIO:
+"{pergunta}"
 
-## REGRAS ABSOLUTAS - NUNCA FAÇA ISSO:
-❌ NUNCA peça para o usuário descrever o que está vendo
-❌ NUNCA diga "se você puder me dar mais detalhes"
-❌ NUNCA diga "se você puder descrever"
-❌ NUNCA diga "se você tiver mais informações"
-❌ NUNCA sugira que o usuário precisa ver algo
-❌ NUNCA mencione porcentagens ou níveis de confiança
+## REGRAS ABSOLUTAS - NUNCA FAÇA:
+❌ NUNCA invente posições (esquerda, direita, centro, etc.)
+❌ NUNCA invente quantidades diferentes das fornecidas
+❌ NUNCA invente objetos não listados
+❌ NUNCA use palavras como "parece", "aparenta", "talvez", "provavelmente"
+❌ NUNCA faça suposições sobre o ambiente
+❌ NUNCA mencione confianças ou porcentagens
+❌ NUNCA peça para o usuário descrever algo
 
-## COMO RESPONDER PARA DEFICIENTES VISUAIS:
+## COMO RESPONDER PARA PERGUNTAS SOBRE A IMAGEM:
+1. Se a pergunta é sobre algo NÃO detectado: "Não estou detectando [objeto/pergunta]"
+2. Se a pergunta é sobre algo DETECTADO: Responda APENAS com os dados
+3. Se não tem dados: "Não estou detectando elementos específicos"
 
-### SE A PERGUNTA É SOBRE A IMAGEM (use os dados acima):
-- Baseie-se APENAS nos dados detectados
-- Use informações de posição (esquerda, direita, centro) quando disponível
-- Se a pergunta for sobre algo não detectado: "Não estou detectando [objeto] nesta imagem"
-- Se não tem dados suficientes: "Não estou conseguindo identificar [elemento] com clareza"
-- Use descrições táteis/spaciais quando possível
+## EXEMPLOS CORRETOS:
+- Dados: "1 pessoa" | Pergunta: "Quantas pessoas?" → "1 pessoa"
+- Dados: "1 pessoa" | Pergunta: "Tem cadeira?" → "Não estou detectando cadeira"
+- Dados: "Nenhum objeto" | Pergunta: "O que tem?" → "Não estou detectando elementos específicos"
 
-### SE A PERGUNTA É GERAL:
-- Responda naturalmente como assistente
-- Seja útil e acolhedora
-- Se não souber: "Não tenho essa informação no momento"
+## EXEMPLOS INCORRETOS:
+- "Uma pessoa à esquerda" ❌ (inventou posição)
+- "Parece ter duas pessoas" ❌ (usou "parece")
+- "Talvez seja interno" ❌ (fez suposição)
+- "Provavelmente 90% de certeza" ❌ (mencionou confiança)
 
-### TOM E ESTILO:
-- Fale de forma clara e direta
-- Use descrições objetivas
-- Seja empática mas não condescendente
-- Use pontos de referência espaciais
-- Adicione emojis ocasionalmente para tom amigável
+## IMPORTANTE:
+Você recebeu APENAS os dados acima. Se não está nos dados, NÃO EXISTE.
 
-### EXEMPLOS DE RESPOSTAS ADEQUADAS:
-- "Vejo uma pessoa no centro da imagem."
-- "Não estou detectando cadeiras neste ambiente."
-- "Há uma mesa à direita."
-- "A imagem parece mostrar um ambiente interno."
-
-### EXEMPLOS DE RESPOSTAS INADEQUADAS (EVITAR):
-- "Se você puder descrever melhor..." ❌
-- "Me dê mais detalhes..." ❌
-- "O que você está vendo?" ❌
-- "Descreva o ambiente para mim..." ❌
-- "Com 80% de certeza..." ❌
-- "A confiança da detecção é 90%" ❌
-
-IMPORTANTE: Você é a Specula, os olhos do usuário. Descreva o que está detectando sem nunca pedir ajuda visual ao usuário e sem mencionar confianças.
-
-Agora responda à pergunta:"""
+Agora responda à pergunta APENAS com base nos dados fornecidos:"""
                 
                 import openai
                 
@@ -366,12 +344,15 @@ Agora responda à pergunta:"""
                         {"role": "system", "content": prompt},
                         {"role": "user", "content": pergunta}
                     ],
-                    max_tokens=300,
-                    temperature=0.7,
+                    max_tokens=150,  # MENOS tokens para evitar invenções
+                    temperature=0.3,  # TEMPERATURA BAIXA para menos criatividade
                 )
                 
                 resposta = response.choices[0].message.content.strip()
                 processing_time = time.time() - start_time
+                
+                # VALIDAÇÃO: Verificar se resposta não inventou nada
+                resposta = self._validar_resposta_contra_dados(resposta, contador_objetos, total_pessoas)
                 
                 # Determinar tipo
                 tipo = "sobre_imagem" if parece_sobre_imagem else "geral"
@@ -390,11 +371,114 @@ Agora responda à pergunta:"""
                 
             except Exception as e:
                 logger.error(f"❌ Erro OpenAI na pergunta: {e}")
-                # Fallback para modo local adaptado
-                return self._responder_local_adaptado(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados, start_time)
+                # Fallback para modo local restritivo
+                return self._responder_local_restritivo(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados, start_time)
         else:
-            # Modo local adaptado
-            return self._responder_local_adaptado(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados, start_time)
+            # Modo local restritivo
+            return self._responder_local_restritivo(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detectados, start_time)
+
+    def _formatar_dados_para_prompt_restritivo(self, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados=None):
+        """Formata dados para o prompt - HIPER RESTRITIVO - SEM POSIÇÕES"""
+        partes = []
+        
+        # Pessoas - contagem SIMPLES
+        pessoas_yolo = contador_objetos.get('person', 0)
+        total_detectado = max(total_pessoas, pessoas_yolo)
+        
+        if total_detectado > 0:
+            if total_detectado == 1:
+                partes.append("1 pessoa")
+            else:
+                partes.append(f"{total_detectado} pessoas")
+        
+        # Objetos - contagem SIMPLES, SEM posições
+        if objetos_detalhados:
+            # Agrupar objetos por tipo
+            objetos_agrupados = {}
+            for obj in objetos_detalhados:
+                nome = obj.get('name', '')
+                if nome != 'person':  # Pessoas já tratamos
+                    quantidade = obj.get('count', 1)
+                    if nome not in objetos_agrupados:
+                        objetos_agrupados[nome] = 0
+                    objetos_agrupados[nome] += quantidade
+            
+            # Formatar objetos agrupados
+            for nome_ingles, quantidade in objetos_agrupados.items():
+                nome_pt = self._traduzir_objeto(nome_ingles)
+                
+                if quantidade == 1:
+                    partes.append(f"1 {nome_pt}")
+                else:
+                    partes.append(f"{quantidade} {nome_pt}s")
+        
+        # Fallback para contador simples
+        elif contador_objetos:
+            outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
+            if outros_objetos:
+                for obj_ingles, quantidade in outros_objetos.items():
+                    obj_pt = self._traduzir_objeto(obj_ingles)
+                    if quantidade == 1:
+                        partes.append(f"1 {obj_pt}")
+                    else:
+                        partes.append(f"{quantidade} {obj_pt}s")
+        
+        if not partes:
+            return "Nenhum objeto ou pessoa detectado"
+        
+        return " | ".join(partes)
+
+    def _validar_resposta_contra_dados(self, resposta, contador_objetos, total_pessoas):
+        """Valida se a resposta não inventou dados"""
+        resposta_lower = resposta.lower()
+        
+        # Verificar se inventou posições
+        palavras_proibidas_posicao = ['esquerda', 'direita', 'centro', 'lado', 'posicionada', 'localizada']
+        for palavra in palavras_proibidas_posicao:
+            if palavra in resposta_lower:
+                logger.warning(f"⚠️ Resposta inventou posição: '{palavra}'")
+                # Corrigir resposta
+                return self._corrigir_resposta_inventada(resposta, contador_objetos, total_pessoas)
+        
+        # Verificar se inventou quantidades de pessoas
+        pessoas_yolo = contador_objetos.get('person', 0)
+        total_detectado = max(total_pessoas, pessoas_yolo)
+        
+        # Contar menções a "pessoa" na resposta
+        if total_detectado == 1:
+            # Não deve mencionar mais de 1 pessoa
+            if resposta_lower.count('pessoa') > 1 or resposta_lower.count('pessoas') > 0:
+                logger.warning(f"⚠️ Resposta inventou mais pessoas: {resposta}")
+                return "Estou detectando uma pessoa."
+        elif total_detectado == 0:
+            # Não deve mencionar pessoas
+            if 'pessoa' in resposta_lower or 'pessoas' in resposta_lower:
+                logger.warning(f"⚠️ Resposta inventou pessoas: {resposta}")
+                return "Não estou detectando pessoas."
+        
+        # Verificar palavras de suposição
+        palavras_suposicao = ['parece', 'aparenta', 'talvez', 'provavelmente', 'acho que', 'acredito que']
+        for palavra in palavras_suposicao:
+            if palavra in resposta_lower:
+                logger.warning(f"⚠️ Resposta usou suposição: '{palavra}'")
+                # Remover suposições
+                for sup in palavras_suposicao:
+                    resposta = resposta.replace(sup, "").replace(sup.capitalize(), "")
+                return resposta.strip()
+        
+        return resposta
+
+    def _corrigir_resposta_inventada(self, resposta, contador_objetos, total_pessoas):
+        """Corrige resposta que inventou dados"""
+        pessoas_yolo = contador_objetos.get('person', 0)
+        total_detectado = max(total_pessoas, pessoas_yolo)
+        
+        if total_detectado == 1:
+            return "Estou detectando uma pessoa."
+        elif total_detectado > 1:
+            return f"Estou detectando {total_detectado} pessoas."
+        else:
+            return "Não estou detectando elementos específicos."
 
     def _verificar_pergunta_tempo(self, pergunta):
         """Verifica pergunta sobre tempo"""
@@ -424,11 +508,11 @@ Agora responda à pergunta:"""
         
         return None
 
-    def _responder_local_adaptado(self, pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados, start_time):
-        """Resposta local adaptada para deficientes visuais"""
+    def _responder_local_restritivo(self, pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados, start_time):
+        """Resposta local restritiva"""
         pergunta_lower = pergunta.lower()
         
-        # Respostas pré-definidas ADAPTADAS
+        # Respostas pré-definidas
         if 'oque é batata' in pergunta_lower or 'o que é batata' in pergunta_lower:
             resposta = "🍠 A batata é um tubérculo comestível muito versátil! Pode ser frita, cozida, assada... É um alimento básico em muitas culturas!"
             tipo = "geral"
@@ -438,17 +522,17 @@ Agora responda à pergunta:"""
             tipo = "geral"
         
         elif any(palavra in pergunta_lower for palavra in ['oi', 'olá', 'bom dia', 'boa tarde', 'boa noite']):
-            resposta = self._gerar_cumprimento_adaptado()
+            resposta = self._gerar_cumprimento()
             tipo = "geral"
         
         elif 'temperatura' in pergunta_lower:
-            resposta = "🌡️ Não tenho acesso a informações meteorológicas no momento. Mas posso te ajudar analisando imagens do ambiente!"
+            resposta = "🌡️ Não tenho acesso a informações meteorológicas no momento."
             tipo = "geral"
         
-        # Perguntas sobre imagem - RESPOSTAS ADAPTADAS
+        # Perguntas sobre imagem - RESTRITIVAS
         elif any(palavra in pergunta_lower for palavra in ['imagem', 'foto', 'essa ', 'esta ', 'o que tem', 'descreva', 'quantas pessoas', 'onde está', 'tem ']):
-            # Usar dados da imagem
-            resposta = self._gerar_resposta_sobre_imagem_adaptada(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados)
+            # Usar dados da imagem SEM inventar
+            resposta = self._gerar_resposta_sobre_imagem_restritiva(pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados)
             tipo = "sobre_imagem"
         
         else:
@@ -468,119 +552,78 @@ Agora responda à pergunta:"""
             'dados_utilizados': 'modo local'
         }
 
-    def _gerar_cumprimento_adaptado(self):
-        """Gera cumprimento adaptado"""
+    def _gerar_cumprimento(self):
+        """Gera cumprimento"""
         hora = datetime.now().hour
         if 5 <= hora < 12:
-            return "☀️ Bom dia! Eu sou a Specula, sua assistente visual. Estou pronta para descrever o ambiente para você!"
+            return "☀️ Bom dia! Eu sou a Specula, sua assistente visual."
         elif 12 <= hora < 18:
-            return "🌤️ Boa tarde! Sou a Specula, sua assistente para análise de ambientes. O que gostaria de saber?"
+            return "🌤️ Boa tarde! Sou a Specula, sua assistente para análise de ambientes."
         else:
-            return "🌙 Boa noite! Eu sou a Specula, pronta para ajudar você a entender o ambiente ao seu redor."
+            return "🌙 Boa noite! Eu sou a Specula, sua assistente visual."
 
-    def _gerar_resposta_sobre_imagem_adaptada(self, pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados):
-        """Resposta adaptada sobre imagem para deficientes visuais"""
+    def _gerar_resposta_sobre_imagem_restritiva(self, pergunta, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados):
+        """Resposta restritiva sobre imagem - NÃO INVENTA"""
         pergunta_lower = pergunta.lower()
         
         # Pessoas
         pessoas_yolo = contador_objetos.get('person', 0)
         total_detectado = max(total_pessoas, pessoas_yolo)
         
-        # Objetos com detalhes
+        # Objetos
         objetos_pt = {}
         if objetos_detalhados:
             for obj in objetos_detalhados:
                 nome = obj.get('name', '')
-                quantidade = obj.get('count', 1)
-                obj_pt = self._traduzir_objeto(nome)
-                objetos_pt[obj_pt] = objetos_pt.get(obj_pt, 0) + quantidade
+                if nome != 'person':  # Pessoas separadas
+                    quantidade = obj.get('count', 1)
+                    obj_pt = self._traduzir_objeto(nome)
+                    objetos_pt[obj_pt] = objetos_pt.get(obj_pt, 0) + quantidade
         
-        # "O que tem nessa imagem?" ou "Descreva o ambiente"
+        # "O que tem nessa imagem?" ou "Descreva"
         if any(palavra in pergunta_lower for palavra in ['o que tem', 'descreva', 'ambiente']):
-            if total_detectado > 0:
-                if total_detectado == 1:
-                    base = "Na imagem, estou detectando uma pessoa."
-                elif total_detectado == 2:
-                    base = "Estou vendo duas pessoas."
-                else:
-                    base = f"Vejo {total_detectado} pessoas."
-                
-                if objetos_pt:
-                    objetos_lista = []
-                    for obj_pt, qtd in objetos_pt.items():
-                        if qtd == 1:
-                            artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
-                            objetos_lista.append(f"{artigo} {obj_pt}")
-                        else:
-                            objetos_lista.append(f"{qtd} {obj_pt}s")
-                    
-                    if objetos_lista:
-                        return f"{base} Também identifico {', '.join(objetos_lista)}."
-                
-                return base + " Não estou identificando outros objetos específicos."
-            elif objetos_pt:
-                primeiro = list(objetos_pt.items())[0]
-                obj_nome = primeiro[0]
-                qtd = primeiro[1]
-                
-                if qtd == 1:
-                    artigo = "uma" if obj_nome in ['bola', 'cadeira', 'mesa', 'planta'] else "um"
-                    return f"Estou detectando {artigo} {obj_nome}."
-                else:
-                    return f"Vejo {qtd} {obj_nome}s."
-            else:
-                return "Não estou identificando elementos específicos nesta imagem no momento."
+            return self._gerar_descricao_local_restritiva(contador_objetos, total_pessoas, faces_nomes, objetos_detalhados)
         
         # "Quantas pessoas?"
         elif 'quantas pessoas' in pergunta_lower:
             if total_detectado > 0:
                 if total_detectado == 1:
-                    return "Estou detectando uma pessoa na imagem."
-                elif total_detectado == 2:
-                    return "Vejo duas pessoas."
+                    return "1 pessoa"
                 else:
-                    return f"Identifico {total_detectado} pessoas."
+                    return f"{total_detectado} pessoas"
             else:
-                return "Não estou detectando pessoas nesta imagem."
+                return "Não estou detectando pessoas"
         
         # "Tem [objeto]?"
         elif 'tem ' in pergunta_lower:
             for obj_pt in self.objetos_traduzidos.values():
                 if obj_pt in pergunta_lower:
-                    tem_objeto = obj_pt in objetos_pt
-                    if tem_objeto:
+                    if obj_pt in objetos_pt:
                         quantidade = objetos_pt[obj_pt]
                         if quantidade == 1:
-                            artigo = "uma" if obj_pt in ['bola', 'cadeira', 'mesa', 'planta', 'flor', 'árvore'] else "um"
-                            return f"Sim, estou detectando {artigo} {obj_pt}."
+                            return f"Sim, 1 {obj_pt}"
                         else:
-                            return f"Sim, identifico {quantidade} {obj_pt}s."
+                            return f"Sim, {quantidade} {obj_pt}s"
                     else:
-                        return f"Não, não estou detectando {obj_pt}."
+                        return f"Não, não estou detectando {obj_pt}"
         
-        # "Esta foto parece ser interna ou externa?"
-        elif any(palavra in pergunta_lower for palavra in ['interna', 'externa', 'dentro', 'fora']):
-            # Baseado nos objetos detectados, tentar inferir
-            if 'person' in contador_objetos and len(contador_objetos) == 1:
-                return "Com base na detecção, parece ser um ambiente interno."
-            else:
-                return "Não tenho informações suficientes para determinar se é interno ou externo."
-        
-        # Resposta genérica adaptada
+        # Resposta genérica
         if total_detectado > 0:
-            return f"Estou detectando {total_detectado} pessoa{'s' if total_detectado > 1 else ''} na imagem."
+            if total_detectado == 1:
+                return "Estou detectando uma pessoa"
+            else:
+                return f"Estou detectando {total_detectado} pessoas"
         elif objetos_pt:
             primeiro = list(objetos_pt.items())[0]
             obj_nome = primeiro[0]
             qtd = primeiro[1]
             
             if qtd == 1:
-                artigo = "uma" if obj_nome in ['bola', 'cadeira', 'mesa', 'planta'] else "um"
-                return f"Identifico {artigo} {obj_nome}."
+                return f"Estou detectando 1 {obj_nome}"
             else:
-                return f"Vejo {qtd} {obj_nome}s."
+                return f"Estou detectando {qtd} {obj_nome}s"
         else:
-            return "Não estou conseguindo identificar elementos específicos nesta imagem."
+            return "Não estou detectando elementos específicos"
 
     # ========== MÉTODOS AUXILIARES ==========
 
@@ -602,68 +645,6 @@ Agora responda à pergunta:"""
         objetos_count = len(objetos_detectados or [])
         faces_count = len(faces_nomes or [])
         return f"{objetos_count} objetos, {faces_count} pessoas"
-
-    def _formatar_dados_para_prompt(self, contador_objetos, total_pessoas, faces_nomes, objetos_detalhados=None):
-        """Formata dados para o prompt - SEM INFORMAÇÕES DE CONFIANÇA PARA O USUÁRIO"""
-        partes = []
-        
-        # Pessoas
-        pessoas_yolo = contador_objetos.get('person', 0)
-        total_detectado = max(total_pessoas, pessoas_yolo)
-        
-        if total_detectado > 0:
-            if faces_nomes and any(n != 'Desconhecido' for n in faces_nomes):
-                conhecidas = [n for n in faces_nomes if n != 'Desconhecido']
-                if conhecidas:
-                    if len(conhecidas) == 1:
-                        partes.append(f"1 pessoa identificada: {conhecidas[0]}")
-                    else:
-                        pessoas_str = ', '.join(conhecidas[:-1]) + ' e ' + conhecidas[-1]
-                        partes.append(f"{len(conhecidas)} pessoas identificadas: {pessoas_str}")
-            else:
-                if total_detectado == 1:
-                    partes.append("1 pessoa")
-                else:
-                    partes.append(f"{total_detectado} pessoas")
-        
-        # Objetos DETALHADOS (se disponível) - SEM CONFIANÇA
-        if objetos_detalhados:
-            # Agrupar objetos por tipo primeiro
-            objetos_agrupados = {}
-            for obj in objetos_detalhados:
-                nome = obj.get('name', '')
-                quantidade = obj.get('count', 1)
-                if nome not in objetos_agrupados:
-                    objetos_agrupados[nome] = 0
-                objetos_agrupados[nome] += quantidade
-            
-            # Formatar objetos agrupados
-            for nome_ingles, quantidade in objetos_agrupados.items():
-                nome_pt = self._traduzir_objeto(nome_ingles)
-                
-                if quantidade == 1:
-                    partes.append(f"1 {nome_pt}")
-                else:
-                    partes.append(f"{quantidade} {nome_pt}s")
-        
-        # Fallback para contador simples
-        elif contador_objetos:
-            outros_objetos = {k: v for k, v in contador_objetos.items() if k != 'person'}
-            if outros_objetos:
-                objetos_lista = []
-                for obj_ingles, quantidade in outros_objetos.items():
-                    obj_pt = self._traduzir_objeto(obj_ingles)
-                    if quantidade == 1:
-                        objetos_lista.append(f"1 {obj_pt}")
-                    else:
-                        objetos_lista.append(f"{quantidade} {obj_pt}s")
-                
-                partes.append(f"Objetos: {', '.join(objetos_lista)}")
-        
-        if not partes:
-            return "Nenhum objeto ou pessoa detectado."
-        
-        return " | ".join(partes)
 
     # ========== MÉTODO PARA /estatistica ==========
 
