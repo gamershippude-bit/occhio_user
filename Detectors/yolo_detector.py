@@ -64,8 +64,8 @@ class YOLODetector:
             'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
         ]
     
-    def detectar_com_bbox(self, frame, confidence_threshold=0.25):
-        """Detecta objetos retornando bounding boxes - VERSÃO MELHORADA"""
+    def detectar_com_bbox(self, frame, confidence_threshold=0.45):  # AUMENTADO de 0.25 para 0.45
+        """Detecta objetos retornando bounding boxes - VERSÃO MAIS CONSERVATIVA"""
         try:
             if self.model is None:
                 logger.error("❌ Modelo YOLO não inicializado")
@@ -80,7 +80,7 @@ class YOLODetector:
                 frame = cv2.resize(frame, (new_w, new_h))
                 logger.debug(f"📏 Frame redimensionado: {new_w}x{new_h}")
             
-            # Executar inferência
+            # Executar inferência com threshold mais alto
             results = self.model(frame, conf=confidence_threshold, verbose=False)
             
             detections = []
@@ -97,21 +97,43 @@ class YOLODetector:
                             
                         class_name = self.classes[cls_id] if cls_id < len(self.classes) else f'class_{cls_id}'
                         
-                        # FILTRO ESPECIAL PARA "SPORTS BALL" - aumentar confiança mínima
-                        if class_name == 'sports ball':
-                            # Sports ball tem muitos falsos positivos - exigir confiança mais alta
-                            min_confidence = max(confidence_threshold, 0.5)  # Mínimo 50% para bola
-                            if conf < min_confidence:
-                                logger.debug(f"⏩ Ignorando sports ball com confiança baixa: {conf:.2f}")
-                                continue
+                        # FILTRO ESPECIAL PARA OBJETOS QUE GERAM MUITOS FALSOS POSITIVOS
+                        # Aumentar threshold mínimo para objetos problemáticos
+                        min_confidences = {
+                            'sports ball': 0.60,      # Muito suscetível a falsos positivos
+                            'tie': 0.50,             # Só 7% de confiança no seu caso!
+                            'handbag': 0.50,         # Só 1%!
+                            'backpack': 0.50,        # Só 1.5%!
+                            'remote': 0.50,          # Só 1%!
+                            'truck': 0.50,           # Só 3%!
+                            'kite': 0.50,
+                            'frisbee': 0.50,
+                            'skateboard': 0.50,
+                            'surfboard': 0.50,
+                        }
                         
-                        # FILTRO ESPECIAL PARA OBJETOS PEQUENOS/DIFÍCEIS
+                        min_conf = min_confidences.get(class_name, confidence_threshold)
+                        if conf < min_conf:
+                            logger.debug(f"⏩ Ignorando {class_name} com confiança baixa para este tipo: {conf:.3f} < {min_conf}")
+                            continue
+                        
+                        # FILTRO POR TAMANHO: Ignorar objetos muito pequenos
                         box_width = box[2] - box[0]
                         box_height = box[3] - box[1]
                         
-                        # Ignorar bounding boxes muito pequenas (possíveis falsos positivos)
-                        if box_width < 20 or box_height < 20:
-                            logger.debug(f"⏩ Ignorando objeto muito pequeno: {class_name} ({box_width}x{box_height})")
+                        # Tamanhos mínimos (em pixels após redimensionamento)
+                        min_sizes = {
+                            'person': (30, 60),      # Pessoa deve ser relativamente grande
+                            'car': (40, 40),
+                            'truck': (50, 50),
+                            'chair': (20, 30),
+                            'bottle': (10, 20),
+                            'cell phone': (10, 20),
+                        }
+                        
+                        min_w, min_h = min_sizes.get(class_name, (15, 15))
+                        if box_width < min_w or box_height < min_h:
+                            logger.debug(f"⏩ Ignorando {class_name} muito pequeno: {box_width}x{box_height} < {min_w}x{min_h}")
                             continue
                         
                         # Adicionar à lista de detecções
@@ -132,7 +154,7 @@ class YOLODetector:
             # Remover duplicatas (mesma classe com overlap)
             detections = self._remover_duplicatas(detections)
             
-            logger.info(f"🔍 YOLO detectou {len(detections)} objetos")
+            logger.info(f"🔍 YOLO detectou {len(detections)} objetos (threshold: {confidence_threshold})")
             if detections:
                 for i, det in enumerate(detections[:5]):  # Mostrar apenas 5 primeiros
                     logger.info(f"   [{i+1}] {det['class']}: {det['confidence']:.3f}")
