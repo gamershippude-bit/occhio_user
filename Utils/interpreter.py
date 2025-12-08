@@ -1,11 +1,11 @@
 """
-Interpreter - VERSÃO INTELIGENTE E NATURAL
-Apenas GPT-4o-mini com instruções claras, sem respostas pré-definidas
+Interpreter
 """
 
 import logging
 import os
 import time
+import numpy as np
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -13,67 +13,38 @@ logger = logging.getLogger(__name__)
 class Interpreter:
     def __init__(self, model_name="gpt-4o-mini", api_key=None):
         self.model_name = model_name
-        self.openai_available = False
+        self.openai_disponivel = False  # Mudei de openai_available para openai_disponivel
         
-        # LOG DE INICIALIZAÇÃO
-        logger.info("=" * 60)
-        logger.info("🔧 INICIANDO INTERPRETER - VERSÃO INTELIGENTE")
-        logger.info("=" * 60)
+        logger.info("🔄 Inicializando Interpreter...")
         
         # Verificar API key
-        logger.info(f"📦 API key recebida: {'✅ SIM' if api_key else '❌ NÃO'}")
-        
         if api_key and isinstance(api_key, str) and api_key.strip():
-            logger.info(f"📦 Tamanho da API key: {len(api_key)} caracteres")
-            logger.info(f"📦 Prefixo: {api_key[:8]}...")
+            logger.info(f"📦 API key recebida: {len(api_key)} caracteres")
             
-            if api_key.startswith('sk-'):
-                logger.info("✅ Formato OpenAI válido (sk-...)")
-            else:
-                logger.warning("⚠️ API key não começa com 'sk-', tentando mesmo assim")
-            
-            # TENTAR IMPORTAR E CONFIGURAR OPENAI
             try:
-                logger.info("🔄 Importando biblioteca OpenAI...")
                 import openai
-                
-                # Configurar API key (forma antiga da 0.28.1)
                 openai.api_key = api_key
                 
-                # TESTAR A CONEXÃO
-                logger.info("🧪 Testando conexão com OpenAI...")
-                try:
-                    # Teste simples
-                    response = openai.ChatCompletion.create(
-                        model="gpt-3.5-turbo",
-                        messages=[{"role": "user", "content": "Teste"}],
-                        max_tokens=5
-                    )
-                    
-                    logger.info(f"✅ OpenAI CONECTADO COM SUCESSO!")
-                    logger.info(f"✅ Modelo: {self.model_name}")
-                    self.openai_available = True
-                    
-                except Exception as test_e:
-                    logger.error(f"❌ Teste de conexão falhou: {test_e}")
-                    self.openai_available = False
-                    
-            except ImportError as e:
-                logger.error(f"❌ Biblioteca 'openai' não instalada: {e}")
-                self.openai_available = False
+                # Testar conexão
+                logger.info("🧪 Testando conexão OpenAI...")
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": "Teste"}],
+                    max_tokens=5
+                )
+                
+                self.openai_disponivel = True
+                logger.info("✅ OpenAI conectado")
+                
             except Exception as e:
-                logger.error(f"❌ Erro ao configurar OpenAI: {str(e)[:200]}")
-                self.openai_available = False
+                logger.error(f"❌ Erro OpenAI: {e}")
+                self.openai_disponivel = False
         else:
-            logger.warning("⚠️ Nenhuma API key válida recebida")
-            logger.warning("⚠️ Usando MODO LOCAL SIMPLES")
-            self.openai_available = False
+            logger.warning("⚠️ Sem API key válida - modo local")
+            self.openai_disponivel = False
         
-        logger.info(f"🎯 Estado final: {'OPENAI ATIVO' if self.openai_available else 'MODO LOCAL'}")
-        logger.info("=" * 60)
-        
-        # Dicionário de tradução para ajudar o GPT
-        self.objetos_traduzidos = {
+        # Dicionário de tradução
+        self.traducoes = {
             'person': 'pessoa',
             'chair': 'cadeira', 
             'table': 'mesa',
@@ -88,28 +59,52 @@ class Interpreter:
             'dog': 'cachorro',
             'cat': 'gato',
             'potted plant': 'planta',
-            'flower': 'flor',
-            'tree': 'árvore',
-            'sports ball': 'bola',
             'clock': 'relógio',
             'vase': 'vaso',
             'tie': 'gravata',
             'truck': 'caminhão',
             'backpack': 'mochila',
             'handbag': 'bolsa',
-            'remote': 'controle remoto'
+            'remote': 'controle remoto',
+            'keyboard': 'teclado',
+            'mouse': 'mouse',
+            'dining table': 'mesa de jantar',
+            'couch': 'sofá',
+            'bed': 'cama',
+            'toilet': 'vaso sanitário',
+            'refrigerator': 'geladeira',
+            'microwave': 'microondas',
+            'oven': 'forno',
+            'sink': 'pia',
+            'sports ball': 'bola esportiva',
+            'frisbee': 'frisbee',
+            'skateboard': 'skate',
+            'surfboard': 'prancha de surf',
+            'tennis racket': 'raquete de tênis',
+            'wine glass': 'taça de vinho',
+            'fork': 'garfo',
+            'knife': 'faca',
+            'spoon': 'colher',
+            'bowl': 'tigela',
+            'banana': 'banana',
+            'apple': 'maçã',
+            'sandwich': 'sanduíche',
+            'orange': 'laranja',
+            'pizza': 'pizza',
+            'donut': 'rosquinha',
+            'cake': 'bolo'
         }
 
     # ========== MÉTODO PARA /processar ==========
 
     def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
-        """Gera descrição natural usando apenas GPT"""
+        """Gera descrição natural - compatível com main.py v5"""
         logger.info("🌄 Gerando descrição natural")
         
-        # Preparar dados SIMPLES para o GPT
-        dados_texto = self._formatar_dados_simples(objetos_detectados, faces_nomes)
+        # Preparar dados no formato correto
+        dados_texto = self._formatar_dados_compativel(objetos_detectados)
         
-        if self.openai_available:
+        if self.openai_disponivel:
             try:
                 import openai
                 
@@ -118,29 +113,20 @@ class Interpreter:
                     messages=[
                         {
                             "role": "system",
-                            "content": f"""Você é a Specula, uma assistente amigável que descreve ambientes para pessoas com deficiência visual.
+                            "content": f"""Você é a Specula, assistente amigável para deficientes visuais.
 
-DADOS DETECTADOS NA IMAGEM (APENAS ESTES):
+DADOS DETECTADOS:
 {dados_texto}
 
 INSTRUÇÕES:
-1. Baseie-se APENAS nos dados acima - não invente nada
-2. Seja natural, amigável e use emojis 😊
-3. Fale na primeira pessoa: "Vejo", "Estou detectando"
-4. Se não há dados: "Não estou identificando elementos específicos"
-5. Traduza para português se necessário
-6. NUNCA peça para o usuário descrever algo (ele é deficiente visual)
-7. NUNCA invente posições (esquerda/direita/centro)
-8. NUNCA invente objetos não listados
-
-EXEMPLOS:
-- Dados: "1 pessoa" → "Vejo uma pessoa na imagem. 😊"
-- Dados: "2 pessoas, 1 cadeira" → "Estou detectando duas pessoas e uma cadeira."
-- Dados: "Nenhum objeto" → "Não estou identificando elementos específicos no momento."
-
-Agora descreva o que está vendo:"""
+- Baseie-se APENAS nos dados acima
+- Seja natural e amigável
+- Traduza nomes para português
+- Não invente posições ou quantidades
+- Usuário é deficiente visual
+- NUNCA peça para descrever algo"""
                         },
-                        {"role": "user", "content": "O que você está vendo na imagem?"}
+                        {"role": "user", "content": "Descreva o que vê"}
                     ],
                     max_tokens=120,
                     temperature=0.6,
@@ -149,119 +135,90 @@ Agora descreva o que está vendo:"""
                 return response.choices[0].message.content.strip()
                 
             except Exception as e:
-                logger.error(f"❌ Erro OpenAI na descrição: {e}")
-                # Fallback muito simples
-                return self._descricao_local_simples(objetos_detectados)
+                logger.error(f"❌ Erro OpenAI: {e}")
+                return self._descricao_local(objetos_detectados)
         else:
-            # Modo local muito simples
-            return self._descricao_local_simples(objetos_detectados)
+            return self._descricao_local(objetos_detectados)
 
-    def _descricao_local_simples(self, objetos_detectados):
-        """Fallback local muito simples"""
+    def _descricao_local(self, objetos_detectados):
+        """Descrição local de fallback"""
         if not objetos_detectados:
-            return "Olá! Sou a Specula. Não estou identificando elementos específicos."
+            return "Olá! Sou a Specula. Não estou identificando objetos claramente."
         
-        pessoas = sum(1 for obj in objetos_detectados if obj.get('name') == 'person')
-        outros = [obj for obj in objetos_detectados if obj.get('name') != 'person']
+        # Contar objetos únicos
+        contagem = {}
+        for obj in objetos_detectados:
+            nome = self._obter_nome_portugues(obj)
+            contagem[nome] = contagem.get(nome, 0) + obj.get('quantidade', 1)
         
-        if pessoas > 0 and not outros:
-            if pessoas == 1:
-                return "Vejo uma pessoa."
+        # Construir descrição
+        itens = []
+        for nome, qtd in contagem.items():
+            if qtd == 1:
+                itens.append(f"1 {nome}")
             else:
-                return f"Vejo {pessoas} pessoas."
-        elif pessoas > 0 and outros:
-            return f"Vejo {pessoas} pessoa(s) e outros objetos."
+                itens.append(f"{qtd} {nome}s")
+        
+        if itens:
+            return f"Olá! Vejo: {', '.join(itens)}."
         else:
-            return "Vejo alguns objetos na imagem."
+            return "Olá! Sou a Specula."
 
     # ========== MÉTODO PRINCIPAL PARA /perguntar ==========
 
     def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
-        """Responde perguntas usando apenas GPT com instruções claras"""
+        """Responde perguntas - RETORNO COMPATÍVEL com main.py v5"""
         logger.info(f"💬 Processando pergunta: '{pergunta}'")
+        inicio_tempo = time.time()
         
-        start_time = time.time()
-        
-        # Verificar se é pergunta sobre tempo (único tratamento especial necessário)
-        resposta_tempo = self._verificar_pergunta_tempo(pergunta)
+        # Verificar perguntas de tempo/data
+        resposta_tempo = self._verificar_pergunta_tempo_data(pergunta)
         if resposta_tempo:
-            processing_time = time.time() - start_time
+            tempo_ms = int((time.time() - inicio_tempo) * 1000)
             return {
                 'sucesso': True,
-                'timestamp': time.time(),
-                'tempo_processamento': f"{processing_time:.2f}s",
-                'pergunta': pergunta,
-                'resposta': resposta_tempo,
-                'tipo_pergunta': "geral",
-                'correlacao_com_imagem': False,
-                'dados_utilizados': "Pergunta geral (tempo/data)"
+                'timestamp': int(time.time() * 1000),  # millis
+                'tempo_processamento_ms': tempo_ms,    # ms
+                'dados': {
+                    'pergunta': pergunta,
+                    'resposta': resposta_tempo,
+                    'correlacao_com_imagem': False,
+                    'confianca_resposta': 1.0
+                }
             }
         
-        # Preparar dados SIMPLES para o GPT
-        dados_texto = self._formatar_dados_simples(objetos_detectados, faces_nomes)
+        # Preparar dados
+        dados_texto = self._formatar_dados_compativel(objetos_detectados)
         
-        if self.openai_available:
+        if self.openai_disponivel:
             try:
                 import openai
                 
-                # Analisar se a pergunta é sobre a imagem
+                # Analisar se é sobre imagem
                 pergunta_lower = pergunta.lower()
-                parece_sobre_imagem = any(palavra in pergunta_lower for palavra in [
+                sobre_imagem = any(palavra in pergunta_lower for palavra in [
                     'imagem', 'foto', 'essa ', 'esta ', 'nesta ', 'dessa ',
                     'o que você vê', 'o que tem', 'descreva', 'analise',
                     'quantas pessoas', 'tem ', 'há ', 'vejo', 'identifica',
-                    'quantos ', 'tem alguma', 'há alguma'
+                    'quantos ', 'tem alguma', 'há alguma', 'o que está'
                 ])
                 
-                # PROMPT INTELIGENTE E CLARO
-                prompt = f"""# ESPECIFICAÇÕES DA SPECULA
+                prompt = f"""Você é a Specula, assistente para deficientes visuais.
 
-## CONTEXTO:
-Você é a Specula, uma assistente amigável e útil. O usuário é uma pessoa com deficiência visual.
-
-## DADOS DA IMAGEM ATUAL (APENAS ESTES - NADA MAIS):
+DADOS DA IMAGEM (APENAS ESTES):
 {dados_texto}
 
-## PERGUNTA DO USUÁRIO:
-"{pergunta}"
+PERGUNTA: "{pergunta}"
 
-## REGRAS FUNDAMENTAIS:
+REGRAS:
+1. Baseie-se APENAS nos dados acima para perguntas sobre imagem
+2. Não invente objetos, posições ou quantidades
+3. Usuário é deficiente visual - NUNCA peça para descrever
+4. Seja natural e amigável
+5. Para perguntas gerais, responda normalmente
+6. Se não detecta algo: "Não estou detectando isso"
 
-### SOBRE OS DADOS DA IMAGEM:
-1. BASEIE-SE APENAS nos dados acima - não invente nada
-2. Se algo NÃO está nos dados, diga "Não estou detectando [isso]"
-3. Não invente posições (esquerda/direita/centro)
-4. Não invente quantidades diferentes
-5. Não invente objetos não listados
-6. Traduza para português se necessário
-
-### SOBRE O USUÁRIO:
-7. O usuário é DEFICIENTE VISUAL - NUNCA peça para ele descrever algo
-8. NUNCA diga "se você puder me dar mais detalhes"
-9. NUNCA diga "descreva o que está vendo"
-
-### SOBRE SUAS RESPOSTAS:
-10. Seja NATURAL, AMIGÁVEL e útil 😊
-11. Use emojis ocasionalmente para tom amigável
-12. Seja clara e direta
-13. Para perguntas gerais (não sobre imagem), responda normalmente
-14. Se não sabe algo: "Não tenho essa informação no momento"
-
-### EXEMPLOS CORRETOS:
-- Dados: "1 pessoa" | Pergunta: "Quantas pessoas?" → "Vejo uma pessoa. 😊"
-- Dados: "1 pessoa" | Pergunta: "Tem cadeira?" → "Não estou detectando cadeiras."
-- Dados: "Nenhum objeto" | Pergunta: "O que tem?" → "Não estou identificando elementos específicos."
-- Pergunta: "Que horas são?" → "🕒 São 10:30 (horário de Brasília)."
-- Pergunta: "O que é batata?" → "🍠 A batata é um tubérculo comestível..."
-
-### EXEMPLOS INCORRETOS:
-- "Uma pessoa à esquerda" ❌ (inventou posição)
-- "Parece ter duas pessoas" ❌ (inventou quantidade)
-- "Se você puder descrever..." ❌ (usuário é deficiente visual)
-- "Me dê mais detalhes..." ❌ (usuário é deficiente visual)
-
-## AGORA RESPONDA:
-Baseando-se APENAS nos dados quando for sobre a imagem, sendo natural e amigável:"""
+RESPONDA:"""
                 
                 response = openai.ChatCompletion.create(
                     model=self.model_name,
@@ -270,75 +227,82 @@ Baseando-se APENAS nos dados quando for sobre a imagem, sendo natural e amigáve
                         {"role": "user", "content": pergunta}
                     ],
                     max_tokens=200,
-                    temperature=0.7,  # Temperatura natural
+                    temperature=0.7,
                 )
                 
                 resposta = response.choices[0].message.content.strip()
-                processing_time = time.time() - start_time
+                tempo_ms = int((time.time() - inicio_tempo) * 1000)
                 
-                # Determinar tipo (apenas para logging)
-                tipo = "sobre_imagem" if parece_sobre_imagem else "geral"
-                correlacao = tipo == "sobre_imagem"
+                # Detecções relevantes (top 3 por confiança)
+                deteccoes_relevantes = []
+                if objetos_detectados and sobre_imagem:
+                    # Ordenar por confiança
+                    objetos_ordenados = sorted(objetos_detectados, 
+                                              key=lambda x: x.get('confianca', 0), 
+                                              reverse=True)[:3]
+                    
+                    for obj in objetos_ordenados:
+                        deteccoes_relevantes.append({
+                            'nome': obj.get('nome', 'desconhecido'),
+                            'confianca': obj.get('confianca', 0)
+                        })
                 
                 return {
                     'sucesso': True,
-                    'timestamp': time.time(),
-                    'tempo_processamento': f"{processing_time:.2f}s",
-                    'pergunta': pergunta,
-                    'resposta': resposta,
-                    'tipo_pergunta': tipo,
-                    'correlacao_com_imagem': correlacao,
-                    'dados_utilizados': self._contar_dados(objetos_detectados) if correlacao else "Pergunta geral"
+                    'timestamp': int(time.time() * 1000),
+                    'tempo_processamento_ms': tempo_ms,
+                    'dados': {
+                        'pergunta': pergunta,
+                        'resposta': resposta,
+                        'deteccoes_relevantes': deteccoes_relevantes,
+                        'correlacao_com_imagem': sobre_imagem,
+                        'confianca_resposta': 0.8 if sobre_imagem else 1.0,
+                        'total_deteccoes': len(objetos_detectados or [])
+                    }
                 }
                 
             except Exception as e:
-                logger.error(f"❌ Erro OpenAI na pergunta: {e}")
-                # Fallback muito simples
-                return self._resposta_local_simples(pergunta, objetos_detectados, start_time)
+                logger.error(f"❌ Erro OpenAI: {e}")
+                return self._resposta_local(pergunta, objetos_detectados, inicio_tempo)
         else:
-            # Modo local muito simples
-            return self._resposta_local_simples(pergunta, objetos_detectados, start_time)
+            return self._resposta_local(pergunta, objetos_detectados, inicio_tempo)
 
-    def _verificar_pergunta_tempo(self, pergunta):
-        """Verifica pergunta sobre tempo (única exceção necessária)"""
+    def _verificar_pergunta_tempo_data(self, pergunta):
+        """Verifica perguntas sobre tempo/data"""
         pergunta_lower = pergunta.lower()
         
         if any(palavra in pergunta_lower for palavra in ['que horas', 'que hora', 'horas são', 'hora é']):
             try:
                 brasilia_tz = timezone(timedelta(hours=-3))
-                agora_brasilia = datetime.now(brasilia_tz)
-                hora_str = agora_brasilia.strftime("%H:%M")
-                return f"🕒 São {hora_str} (horário de Brasília)."
+                agora = datetime.now(brasilia_tz)
+                hora = agora.strftime("%H:%M")
+                return f"🕒 São {hora} (horário de Brasília)."
             except:
                 agora = datetime.now()
-                hora_str = agora.strftime("%H:%M")
-                return f"🕒 São {hora_str}."
+                hora = agora.strftime("%H:%M")
+                return f"🕒 São {hora}."
         
         elif any(palavra in pergunta_lower for palavra in ['que dia é hoje', 'qual a data', 'data de hoje']):
             try:
                 brasilia_tz = timezone(timedelta(hours=-3))
-                agora_brasilia = datetime.now(brasilia_tz)
-                data_str = agora_brasilia.strftime("%d/%m/%Y")
-                return f"📅 Hoje é {data_str}."
+                agora = datetime.now(brasilia_tz)
+                data = agora.strftime("%d/%m/%Y")
+                return f"📅 Hoje é {data}."
             except:
                 agora = datetime.now()
-                data_str = agora.strftime("%d/%m/%Y")
-                return f"📅 Hoje é {data_str}."
+                data = agora.strftime("%d/%m/%Y")
+                return f"📅 Hoje é {data}."
         
         return None
 
-    def _resposta_local_simples(self, pergunta, objetos_detectados, start_time):
-        """Fallback local muito simples"""
+    def _resposta_local(self, pergunta, objetos_detectados, inicio_tempo):
+        """Resposta local de fallback"""
         pergunta_lower = pergunta.lower()
         
-        # Apenas respostas muito básicas
-        if 'quem é você' in pergunta_lower:
+        # Respostas básicas
+        if 'quem é você' in pergunta_lower or 'seu nome' in pergunta_lower:
             resposta = "👋 Eu sou a Specula, sua assistente visual!"
-        elif 'batata' in pergunta_lower:
-            resposta = "🍠 A batata é um alimento muito versátil!"
-        elif 'temperatura' in pergunta_lower:
-            resposta = "🌡️ Não tenho acesso a informações meteorológicas."
-        elif any(palavra in pergunta_lower for palavra in ['oi', 'olá', 'bom dia', 'boa tarde', 'boa noite']):
+        elif 'oi' in pergunta_lower or 'olá' in pergunta_lower:
             hora = datetime.now().hour
             if 5 <= hora < 12:
                 resposta = "☀️ Bom dia! Sou a Specula."
@@ -346,141 +310,149 @@ Baseando-se APENAS nos dados quando for sobre a imagem, sendo natural e amigáve
                 resposta = "🌤️ Boa tarde! Sou a Specula."
             else:
                 resposta = "🌙 Boa noite! Sou a Specula."
-        else:
-            resposta = "Olá! Sou a Specula. Como posso te ajudar?"
-        
-        processing_time = time.time() - start_time
-        
-        return {
-            'sucesso': True,
-            'timestamp': time.time(),
-            'tempo_processamento': f"{processing_time:.2f}s",
-            'pergunta': pergunta,
-            'resposta': resposta,
-            'tipo_pergunta': "geral",
-            'correlacao_com_imagem': False,
-            'dados_utilizados': 'modo local'
-        }
-
-    # ========== MÉTODOS AUXILIARES SIMPLES ==========
-
-    def _formatar_dados_simples(self, objetos_detectados, faces_nomes):
-        """Formata dados de forma SIMPLES para o GPT"""
-        if not objetos_detectados:
-            return "Nenhum objeto ou pessoa detectado na imagem."
-        
-        # Contar pessoas
-        pessoas = sum(obj.get('count', 1) for obj in objetos_detectados if obj.get('name') == 'person')
-        
-        # Listar outros objetos
-        outros_objetos = []
-        for obj in objetos_detectados:
-            nome = obj.get('name', '')
-            if nome != 'person':
-                quantidade = obj.get('count', 1)
-                nome_pt = self.objetos_traduzidos.get(nome, nome)
-                if quantidade == 1:
-                    outros_objetos.append(f"1 {nome_pt}")
-                else:
-                    outros_objetos.append(f"{quantidade} {nome_pt}s")
-        
-        # Construir texto
-        partes = []
-        
-        if pessoas > 0:
-            if pessoas == 1:
-                partes.append("1 pessoa")
-            else:
-                partes.append(f"{pessoas} pessoas")
-        
-        if outros_objetos:
-            partes.extend(outros_objetos)
-        
-        if not partes:
-            return "Nenhum objeto ou pessoa detectado na imagem."
-        
-        return "Detectado: " + ", ".join(partes)
-
-    def _contar_dados(self, objetos_detectados):
-        """Conta dados para logging"""
-        if not objetos_detectados:
-            return "0 objetos"
-        
-        pessoas = sum(1 for obj in objetos_detectados if obj.get('name') == 'person')
-        outros = len(objetos_detectados) - pessoas
-        
-        if pessoas > 0 and outros > 0:
-            return f"{pessoas} pessoas, {outros} objetos"
-        elif pessoas > 0:
-            return f"{pessoas} pessoas"
-        else:
-            return f"{outros} objetos"
-
-    # ========== MÉTODO PARA /estatistica ==========
-
-    def obter_estatisticas(self, objetos_detectados, faces_detectadas=None):
-        """Estatísticas - mantido simples"""
-        logger.info("📊 Gerando estatísticas")
-        
-        start_time = time.time()
-        
-        # Processar objetos
-        objetos_processados = []
-        for i, obj in enumerate(objetos_detectados or [], 1):
-            nome_ingles = obj.get('name', 'desconhecido')
-            confianca = obj.get('confidence', 0)
-            count = obj.get('count', 1)
+        elif 'batata' in pergunta_lower:
+            resposta = "🍠 A batata é um tubérculo comestível muito versátil!"
+        elif objetos_detectados and any(p in pergunta_lower for p in ['o que tem', 'o que vê', 'quantas', 'quantos']):
+            # Tentar responder baseado nos objetos
+            pessoas = sum(obj.get('quantidade', 1) for obj in objetos_detectados 
+                         if obj.get('nome', '').lower() == 'person')
             
-            objetos_processados.append({
-                'id': i,
-                'nome_pt': self.objetos_traduzidos.get(nome_ingles, nome_ingles),
-                'nome_en': nome_ingles,
-                'confianca': confianca,
-                'quantidade': count,
-                'categoria': self._classificar_categoria(nome_ingles)
-            })
+            if 'pessoa' in pergunta_lower or 'pessoas' in pergunta_lower:
+                if pessoas == 0:
+                    resposta = "Não estou detectando pessoas."
+                elif pessoas == 1:
+                    resposta = "Vejo 1 pessoa."
+                else:
+                    resposta = f"Vejo {pessoas} pessoas."
+            else:
+                resposta = "Vejo alguns objetos na imagem."
+        else:
+            resposta = "Olá! Sou a Specula. Como posso ajudar?"
         
-        # Agrupar objetos
-        categorias = {}
-        for obj in (objetos_detectados or []):
-            nome = obj.get('name', 'desconhecido')
-            count = obj.get('count', 1)
-            categoria = self._classificar_categoria(nome)
-            categorias[categoria] = categorias.get(categoria, 0) + count
-        
-        processing_time = time.time() - start_time
+        tempo_ms = int((time.time() - inicio_tempo) * 1000)
         
         return {
             'sucesso': True,
-            'timestamp': time.time(),
-            'tempo_processamento': f"{processing_time:.2f}s",
-            'contagens': {
-                'total_objetos': len(objetos_detectados or []),
-                'total_faces': len(faces_detectadas or []),
-                'objetos_por_categoria': categorias,
-                'faces_conhecidas': len([f for f in (faces_detectadas or []) if f.get('name') != 'Desconhecido']),
-                'faces_desconhecidas': len([f for f in (faces_detectadas or []) if f.get('name') == 'Desconhecido'])
-            },
-            'deteccoes_detalhadas': {
-                'objetos': objetos_processados[:10],
-                'faces': (faces_detectadas or [])[:5]
+            'timestamp': int(time.time() * 1000),
+            'tempo_processamento_ms': tempo_ms,
+            'dados': {
+                'pergunta': pergunta,
+                'resposta': resposta,
+                'deteccoes_relevantes': [],
+                'correlacao_com_imagem': False,
+                'confianca_resposta': 0.5
             }
         }
 
-    def _classificar_categoria(self, objeto_ingles):
-        """Classifica categoria"""
-        categorias = {
-            'móveis': ['chair', 'couch', 'sofa', 'bed', 'table', 'desk'],
-            'pessoas': ['person', 'people', 'human'],
-            'eletrônicos': ['laptop', 'computer', 'tv', 'television', 'cell phone', 'monitor'],
-            'utensílios': ['cup', 'bottle', 'book', 'vase', 'clock', 'plate'],
-            'animais': ['dog', 'cat'],
-            'veículos': ['car', 'bicycle'],
-            'plantas': ['potted plant', 'flower', 'tree'],
-            'vestuário': ['tie', 'handbag', 'backpack']
+    # ========== MÉTODO PARA /estatistica ==========
+
+    def obter_estatisticas(self, objetos_detectados=None, faces_detectadas=None):
+        """Estatísticas - RETORNO COMPATÍVEL com main.py v5"""
+        logger.info("📊 Gerando estatísticas")
+        inicio_tempo = time.time()
+        
+        # Processar objetos
+        objetos_info = []
+        contagem_tipos = {}
+        confiancas = []
+        
+        for obj in (objetos_detectados or []):
+            nome_ingles = obj.get('nome', '')
+            nome_pt = self._obter_nome_portugues(obj)
+            confianca = obj.get('confianca', 0)
+            quantidade = obj.get('quantidade', 1)
+            
+            # Adicionar à lista de objetos
+            objetos_info.append({
+                'nome': nome_pt,
+                'confianca': confianca,
+                'quantidade': quantidade
+            })
+            
+            # Contar por tipo
+            contagem_tipos[nome_pt] = contagem_tipos.get(nome_pt, 0) + quantidade
+            
+            # Coletar confianças
+            confiancas.append(confianca)
+        
+        # Calcular estatísticas de confiança
+        estatisticas_confianca = {
+            'media': 0,
+            'maxima': 0,
+            'minima': 0,
+            'mediana': 0
         }
         
-        for categoria, objetos in categorias.items():
-            if objeto_ingles.lower() in objetos:
+        if confiancas:
+            estatisticas_confianca = {
+                'media': round(float(np.mean(confiancas)), 3),
+                'maxima': round(float(np.max(confiancas)), 3),
+                'minima': round(float(np.min(confiancas)), 3),
+                'mediana': round(float(np.median(confiancas)), 3)
+            }
+        
+        tempo_ms = int((time.time() - inicio_tempo) * 1000)
+        
+        return {
+            'sucesso': True,
+            'timestamp': int(time.time() * 1000),
+            'tempo_processamento_ms': tempo_ms,
+            'dados': {
+                'resumo': {
+                    'total_objetos': len(objetos_detectados or []),
+                    'objetos_unicos': len(contagem_tipos)
+                },
+                'contagem_objetos': contagem_tipos,
+                'estatisticas_confianca': estatisticas_confianca,
+                'amostra_deteccoes': objetos_info[:5]
+            }
+        }
+
+    # ========== MÉTODOS AUXILIARES ==========
+
+    def _formatar_dados_compativel(self, objetos_detectados):
+        """Formata dados no formato correto para GPT"""
+        if not objetos_detectados:
+            return "Nenhum objeto detectado."
+        
+        # Agrupar por tipo
+        grupos = {}
+        for obj in objetos_detectados:
+            nome_pt = self._obter_nome_portugues(obj)
+            quantidade = obj.get('quantidade', 1)
+            grupos[nome_pt] = grupos.get(nome_pt, 0) + quantidade
+        
+        # Construir texto
+        itens = []
+        for nome, qtd in grupos.items():
+            if qtd == 1:
+                itens.append(f"1 {nome}")
+            else:
+                itens.append(f"{qtd} {nome}s")
+        
+        return "Detectado: " + ", ".join(itens)
+
+    def _obter_nome_portugues(self, objeto):
+        """Obtém nome em português do objeto"""
+        nome_ingles = objeto.get('nome', '')
+        if nome_ingles in self.traducoes:
+            return self.traducoes[nome_ingles]
+        return nome_ingles
+
+    def _classificar_categoria(self, nome_ingles):
+        """Classifica objeto em categoria"""
+        categorias = {
+            'móveis': ['chair', 'table', 'couch', 'bed', 'sofa'],
+            'eletrônicos': ['laptop', 'tv', 'cell phone', 'monitor'],
+            'pessoas': ['person'],
+            'utensílios': ['cup', 'bottle', 'book', 'vase', 'clock'],
+            'veículos': ['car', 'bicycle', 'truck'],
+            'animais': ['dog', 'cat'],
+            'alimentos': ['banana', 'apple', 'orange', 'pizza', 'cake'],
+            'plantas': ['potted plant']
+        }
+        
+        for categoria, itens in categorias.items():
+            if nome_ingles in itens:
                 return categoria
-        return "outros"
+        return 'outros'

@@ -13,8 +13,6 @@ class FaceDetector:
         self.known_face_names = []
         self.tolerance = tolerance
         self.min_confidence = 0.5
-        
-        # ✅ NOVO: Controle de logs para performance
         self.ultimo_log_terminal = 0
         self.log_interval = 5  # Segundos entre logs
         
