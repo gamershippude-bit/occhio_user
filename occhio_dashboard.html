@@ -211,6 +211,75 @@
       border: 1px solid #ff6b3540;
     }
     .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-voice {
+      background: #7c3aed22;
+      color: #a78bfa;
+      border: 1px solid #7c3aed55;
+    }
+    .btn-voice.recording {
+      background: #ff6b3522;
+      color: var(--warn);
+      border-color: #ff6b3540;
+      animation: recordPulse 1s infinite;
+    }
+    @keyframes recordPulse {
+      0%, 100% { box-shadow: 0 0 0 0 #ff6b3540; }
+      50%       { box-shadow: 0 0 0 6px #ff6b3500; }
+    }
+
+    .voice-panel {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .voice-panel.active { display: flex; }
+
+    .recording-indicator {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: var(--warn);
+      font-weight: 500;
+    }
+    .recording-indicator.active { display: flex; }
+    .recording-indicator .rec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+      animation: pulse 0.8s infinite;
+    }
+
+    .voice-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .voice-box-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .voice-box-text {
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: var(--text);
+      min-height: 1.2em;
+    }
+    .voice-box-text.empty { color: var(--muted); font-style: italic; }
+
+    .voice-hint {
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-align: center;
+    }
 
     .slider-row {
       display: flex;
@@ -392,6 +461,23 @@
       </div>
     </div>
 
+    <div class="voice-panel" id="voice-panel">
+      <button class="btn btn-voice" id="btn-perguntar">🎙 Perguntar</button>
+      <div class="recording-indicator" id="recording-indicator">
+        <span class="rec-dot"></span>
+        <span>Gravando… solte para enviar</span>
+      </div>
+      <div class="voice-box">
+        <div class="voice-box-label">Sua pergunta</div>
+        <div class="voice-box-text empty" id="transcricao-text">—</div>
+      </div>
+      <div class="voice-box">
+        <div class="voice-box-label">Resposta</div>
+        <div class="voice-box-text empty" id="resposta-text">—</div>
+      </div>
+      <div class="voice-hint">Segure Espaço ou o botão para gravar</div>
+    </div>
+
     <div class="detections-list" id="det-list">
       <div class="empty-state">
         Nenhuma detecção ainda.<br/>Inicie a câmera para começar.
@@ -425,6 +511,11 @@ let fpsTs = performance.now();
 let fpsDisplay = 0;
 let threshold = 0.45;
 let wsReady = false;
+let mediaRecorder = null;
+let audioChunks = [];
+let audioStream = null;
+let gravando = false;
+let processandoVoz = false;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -445,6 +536,11 @@ const wsPill = document.getElementById('ws-pill');
 const wsLabel = document.getElementById('ws-label');
 const camPill = document.getElementById('cam-pill');
 const camLabel = document.getElementById('cam-label');
+const voicePanel = document.getElementById('voice-panel');
+const btnPerguntar = document.getElementById('btn-perguntar');
+const recordingIndicator = document.getElementById('recording-indicator');
+const transcricaoText = document.getElementById('transcricao-text');
+const respostaText = document.getElementById('resposta-text');
 
 function log(msg, tipo = 'info') {
   const el = document.createElement('div');
@@ -472,7 +568,29 @@ function conectarWS() {
   ws.onmessage = (evt) => {
     try {
       const data = JSON.parse(evt.data);
-      if (data.erro) { log(data.erro, 'err'); return; }
+      if (data.erro && data.tipo !== 'resposta_voz') { log(data.erro, 'err'); return; }
+
+      if (data.tipo === 'resposta_voz') {
+        processandoVoz = false;
+        btnPerguntar.disabled = false;
+        if (data.erro) log(data.erro, 'err');
+
+        if (data.transcricao) {
+          transcricaoText.textContent = data.transcricao;
+          transcricaoText.classList.remove('empty');
+        }
+        if (data.resposta) {
+          respostaText.textContent = data.resposta;
+          respostaText.classList.remove('empty');
+          log('Resposta recebida', 'ok');
+        }
+        if (data.audio_b64) {
+          tocarAudio(data.audio_b64);
+        } else if (data.resposta) {
+          log('Áudio indisponível — resposta exibida em texto', 'info');
+        }
+        return;
+      }
 
       lastDeteccoesRaw = data.deteccoes || [];
       lastDeteccoes = lastDeteccoesRaw.filter(d => d.confianca >= threshold);
@@ -487,11 +605,12 @@ function conectarWS() {
 
   ws.onerror = () => log('Erro no WebSocket', 'err');
 
-  ws.onclose = () => {
+  ws.onclose = (evt) => {
     wsReady = false;
     wsPill.classList.remove('live');
     wsLabel.textContent = 'WebSocket desconectado';
-    log('WebSocket fechado', 'err');
+    const motivo = evt.code ? ` (código ${evt.code}${evt.reason ? ': ' + evt.reason : ''})` : '';
+    log(`WebSocket fechado${motivo}`, 'err');
     if (stream) setTimeout(conectarWS, 2000);
   };
 }
@@ -512,6 +631,7 @@ async function iniciarCamera() {
     metrics.style.display = 'flex';
     btnStart.disabled = true;
     btnStop.disabled = false;
+    voicePanel.classList.add('active');
 
     log('Câmera iniciada', 'ok');
     conectarWS();
@@ -524,6 +644,8 @@ async function iniciarCamera() {
 }
 
 function pararCamera() {
+  pararGravacao(true);
+  if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   if (sendLoop) { clearInterval(sendLoop); sendLoop = null; }
@@ -540,6 +662,7 @@ function pararCamera() {
   metrics.style.display = 'none';
   btnStart.disabled = false;
   btnStop.disabled = true;
+  voicePanel.classList.remove('active');
   totalCount.textContent = '0';
   detList.innerHTML = '<div class="empty-state">Câmera parada.</div>';
   log('Câmera parada', 'info');
@@ -644,8 +767,95 @@ function atualizarListaDeteccoes(dets) {
   }).join('');
 }
 
+async function iniciarGravacao() {
+  if (gravando || processandoVoz || !stream) return;
+  try {
+    if (!audioStream) {
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+    mediaRecorder = new MediaRecorder(audioStream, { mimeType });
+    audioChunks = [];
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = enviarAudio;
+    mediaRecorder.start();
+    gravando = true;
+    btnPerguntar.classList.add('recording');
+    recordingIndicator.classList.add('active');
+    log('Gravando pergunta…', 'info');
+  } catch (e) {
+    log(`Microfone negado: ${e.message}`, 'err');
+  }
+}
+
+function pararGravacao(cancelar = false) {
+  if (!gravando || !mediaRecorder) return;
+  gravando = false;
+  btnPerguntar.classList.remove('recording');
+  recordingIndicator.classList.remove('active');
+  if (cancelar) {
+    mediaRecorder.onstop = null;
+    if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    audioChunks = [];
+    return;
+  }
+  if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+}
+
+function enviarAudio() {
+  if (audioChunks.length === 0) return;
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) {
+    log('WebSocket desconectado — não foi possível enviar áudio', 'err');
+    return;
+  }
+
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  audioChunks = [];
+  processandoVoz = true;
+  btnPerguntar.disabled = true;
+  respostaText.textContent = 'Processando…';
+  respostaText.classList.add('empty');
+  log('Enviando pergunta de voz…', 'info');
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const b64 = reader.result.split(',')[1];
+    ws.send(JSON.stringify({ tipo: 'pergunta_voz', audio: b64 }));
+  };
+  reader.readAsDataURL(blob);
+}
+
+function tocarAudio(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const blob = new Blob([bytes], { type: 'audio/mp3' });
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  audio.play().catch(e => log(`Erro ao reproduzir áudio: ${e.message}`, 'err'));
+  audio.onended = () => URL.revokeObjectURL(url);
+}
+
 btnStart.addEventListener('click', iniciarCamera);
 btnStop.addEventListener('click', pararCamera);
+btnPerguntar.addEventListener('mousedown', (e) => { e.preventDefault(); iniciarGravacao(); });
+btnPerguntar.addEventListener('mouseup', () => pararGravacao());
+btnPerguntar.addEventListener('mouseleave', () => { if (gravando) pararGravacao(); });
+btnPerguntar.addEventListener('touchstart', (e) => { e.preventDefault(); iniciarGravacao(); }, { passive: false });
+btnPerguntar.addEventListener('touchend', (e) => { e.preventDefault(); pararGravacao(); });
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && stream && !e.repeat) {
+    e.preventDefault();
+    iniciarGravacao();
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space' && stream) {
+    e.preventDefault();
+    pararGravacao();
+  }
+});
 threshSlider.addEventListener('input', () => {
   threshold = threshSlider.value / 100;
   threshLabel.textContent = `${threshSlider.value}%`;

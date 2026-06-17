@@ -10,12 +10,14 @@ import json
 import numpy as np
 import threading
 import base64
+import tempfile
 from pathlib import Path
 from flask import Flask, jsonify, request
 from flask_sock import Sock
 from typing import Dict, List, Any, Optional
 
-# ================== CONFIGURAÇÃO ==================
+from Utils.glm_client import chat as glm_chat, glm_disponivel
+
 # Limpar variáveis de proxy
 for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy']:
     if var in os.environ:
@@ -50,11 +52,13 @@ class OcchioCloud:
         try:
             logger.info("🚀 INICIANDO OCCHIO CLOUD v5.0")
             
-            # API Key
-            self.api_key = api_key or os.getenv('OPENAI_API_KEY')
-            self.openai_disponivel = bool(self.api_key and isinstance(self.api_key, str) and self.api_key.strip())
+            self.whisper_disponivel = bool(
+                os.getenv('OPENAI_API_KEY', '').strip()
+            )
+            self.glm_disponivel = glm_disponivel()
             
-            logger.info(f"📦 OpenAI: {'✅ DISPONÍVEL' if self.openai_disponivel else '❌ INDISPONÍVEL'}")
+            logger.info(f"📦 Whisper: {'✅ DISPONÍVEL' if self.whisper_disponivel else '❌ INDISPONÍVEL'}")
+            logger.info(f"📦 GLM-5: {'✅ DISPONÍVEL' if self.glm_disponivel else '❌ INDISPONÍVEL'}")
             
             # Inicializar componentes
             self.detector_objetos = None
@@ -62,6 +66,7 @@ class OcchioCloud:
             
             self._inicializar_yolo()
             self._inicializar_interpreter()
+            self.glm_disponivel = getattr(self.interpreter, 'glm_disponivel', False)
             
             logger.info("🎉 Sistema inicializado com sucesso")
             
@@ -83,7 +88,7 @@ class OcchioCloud:
         """Inicializa interpreter"""
         try:
             from Utils.interpreter import Interpreter
-            self.interpreter = Interpreter(api_key=self.api_key)
+            self.interpreter = Interpreter()
             logger.info("✅ Interpreter inicializado")
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar interpreter: {e}")
@@ -100,7 +105,7 @@ class OcchioCloud:
         """Interpreter local de fallback"""
         class InterpreterLocal:
             def __init__(self):
-                self.openai_disponivel = False
+                self.glm_disponivel = False
             
             def gerar_descricao_natural(self, objetos_detectados=None, faces_nomes=None):
                 if objetos_detectados:
@@ -109,7 +114,7 @@ class OcchioCloud:
             
             def perguntar_sobre_imagem(self, pergunta, objetos_detectados=None, faces_nomes=None):
                 return {
-                    "resposta": "Sistema em modo local. Sem resposta da OpenAI.",
+                    "resposta": "Sistema em modo local. Sem resposta do GLM.",
                     "correlacao_com_imagem": False,
                     "confianca": 0.0
                 }
@@ -119,7 +124,8 @@ class OcchioCloud:
         """Setup de emergência"""
         self.detector_objetos = self._criar_detector_local()
         self.interpreter = self._criar_interpreter_local()
-        self.openai_disponivel = False
+        self.glm_disponivel = False
+        self.whisper_disponivel = False
         logger.warning("⚠️ Sistema em modo emergência")
     
     def _decodificar_imagem(self, dados_imagem: str) -> np.ndarray:
@@ -428,14 +434,150 @@ class OcchioCloud:
             logger.error(f'Erro no stream: {e}')
             return {'erro': str(e), 'deteccoes': [], 'total': 0, 'ms': 0}
 
+# ========== VOZ (Whisper + GLM-5 + ElevenLabs) ==========
+
+SYSTEM_PROMPT_VOZ = """Você é o Occhio, um assistente de acessibilidade para deficientes visuais.
+O usuário está usando a câmera do celular ou computador em tempo real.
+Você recebe a lista de objetos detectados por visão computacional (YOLO) no frame atual.
+
+REGRAS:
+- Responda SEMPRE em português brasileiro, de forma clara e concisa (máximo 3 frases).
+- Baseie-se APENAS nos objetos detectados para perguntas sobre o que a câmera está vendo.
+- Não invente objetos, posições ou quantidades que não estejam na lista.
+- Se não houver detecções relevantes, diga honestamente que não está vendo o objeto perguntado.
+- Seja natural, amigável e direto — o usuário ouvirá sua resposta em voz alta.
+- NUNCA peça ao usuário para descrever a cena ou tirar outra foto."""
+
+_elevenlabs_client = None
+_elevenlabs_lock = threading.Lock()
+
+
+def _get_elevenlabs_client():
+    global _elevenlabs_client
+    if _elevenlabs_client is not None:
+        return _elevenlabs_client
+    with _elevenlabs_lock:
+        if _elevenlabs_client is not None:
+            return _elevenlabs_client
+        api_key = os.getenv('ELEVENLABS_API_KEY')
+        if not api_key:
+            return None
+        try:
+            from elevenlabs import ElevenLabs
+            _elevenlabs_client = ElevenLabs(api_key=api_key)
+            logger.info('✅ ElevenLabs inicializado')
+        except Exception as e:
+            logger.error(f'❌ Erro ao inicializar ElevenLabs: {e}')
+        return _elevenlabs_client
+
+
+def _formatar_deteccoes_voz(deteccoes: List[Dict]) -> str:
+    if not deteccoes:
+        return 'Nenhum objeto detectado no momento.'
+    linhas = []
+    for d in deteccoes:
+        nome = d.get('nome', '?')
+        conf = float(d.get('confianca', 0))
+        linhas.append(f'- {nome} (confiança: {conf:.0%})')
+    return '\n'.join(linhas)
+
+
+def transcrever_audio(audio_bytes: bytes) -> str:
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        raise ValueError('OPENAI_API_KEY não configurada')
+
+    import openai
+    openai.api_key = api_key
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        with open(tmp_path, 'rb') as audio_file:
+            result = openai.Audio.transcribe(
+                model='whisper-1',
+                file=audio_file,
+                language='pt',
+            )
+        return (result.get('text') or '').strip()
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def gerar_resposta_voz(pergunta: str, deteccoes: List[Dict]) -> str:
+    if not glm_disponivel():
+        return 'Serviço de IA indisponível no momento.'
+
+    contexto = _formatar_deteccoes_voz(deteccoes)
+    user_content = f"""Objetos detectados pela câmera agora:
+{contexto}
+
+Pergunta do usuário: "{pergunta}"
+
+Responda de forma útil e acessível:"""
+
+    return glm_chat(
+        messages=[
+            {'role': 'system', 'content': SYSTEM_PROMPT_VOZ},
+            {'role': 'user', 'content': user_content},
+        ],
+        max_tokens=200,
+        temperature=0.7,
+    )
+
+
+def sintetizar_voz(texto: str) -> bytes:
+    client = _get_elevenlabs_client()
+    if not client:
+        raise ValueError('ELEVENLABS_API_KEY não configurada')
+
+    audio_generator = client.text_to_speech.convert(
+        voice_id='pNInz6obpgDQGcFmaJgB',
+        text=texto,
+        model_id='eleven_multilingual_v2',
+        output_format='mp3_44100_128',
+    )
+    return b''.join(audio_generator)
+
+
+def processar_pergunta_voz(audio_b64: str, deteccoes_atuais: list) -> dict:
+    audio_bytes = base64.b64decode(audio_b64)
+
+    transcricao = transcrever_audio(audio_bytes)
+    if not transcricao:
+        return {
+            'transcricao': '',
+            'resposta': 'Não consegui entender sua pergunta. Tente falar novamente.',
+            'audio_b64': None,
+        }
+
+    resposta = gerar_resposta_voz(transcricao, deteccoes_atuais)
+
+    audio_b64_out = None
+    try:
+        audio_mp3 = sintetizar_voz(resposta)
+        audio_b64_out = base64.b64encode(audio_mp3).decode('ascii')
+    except Exception as e:
+        logger.error(f'ElevenLabs falhou (resposta em texto mantida): {e}')
+
+    return {
+        'transcricao': transcricao,
+        'resposta': resposta,
+        'audio_b64': audio_b64_out,
+    }
+
+
 # Singleton
 def get_occhio_instance():
     global _occhio_instance
     if _occhio_instance is None:
         with _initialization_lock:
             if _occhio_instance is None:
-                api_key = os.getenv('OPENAI_API_KEY')
-                _occhio_instance = OcchioCloud(api_key=api_key)
+                _occhio_instance = OcchioCloud()
     return _occhio_instance
 
 # ========== ROTAS FLASK ==========
@@ -469,9 +611,10 @@ def index():
 
 @sock.route('/stream')
 def stream_ws(ws):
-    """WebSocket: browser envia frames, servidor devolve bounding boxes."""
+    """WebSocket: frames de vídeo → bounding boxes; áudio → resposta falada."""
     logger.info('Cliente conectado via WebSocket')
     frame_count = 0
+    deteccoes_atuais = []
     try:
         while True:
             mensagem = ws.receive()
@@ -483,21 +626,54 @@ def stream_ws(ws):
                 ws.send(json.dumps({'erro': 'JSON inválido'}))
                 continue
 
+            if dados.get('tipo') == 'pergunta_voz':
+                audio_b64 = dados.get('audio')
+                if not audio_b64:
+                    ws.send(json.dumps({
+                        'tipo': 'resposta_voz',
+                        'erro': "Campo 'audio' não encontrado",
+                    }))
+                    continue
+                try:
+                    resultado = processar_pergunta_voz(audio_b64, deteccoes_atuais)
+                    ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
+                except Exception as e:
+                    logger.error(f'Erro ao processar pergunta de voz: {e}')
+                    ws.send(json.dumps({
+                        'tipo': 'resposta_voz',
+                        'erro': str(e),
+                        'transcricao': '',
+                        'resposta': 'Ocorreu um erro ao processar sua pergunta.',
+                        'audio_b64': None,
+                    }))
+                continue
+
             frame_b64 = dados.get('frame')
             if not frame_b64:
                 ws.send(json.dumps({'erro': "Campo 'frame' não encontrado"}))
                 continue
 
             threshold = float(dados.get('threshold', 0.45))
-            occhio = get_occhio_instance()
-            resultado = occhio.processar_stream(frame_b64, confidence_threshold=threshold)
-            ws.send(json.dumps(resultado))
+            try:
+                occhio = get_occhio_instance()
+                resultado = occhio.processar_stream(frame_b64, confidence_threshold=threshold)
+                deteccoes_atuais = resultado.get('deteccoes', [])
+                ws.send(json.dumps(resultado))
+            except Exception as e:
+                logger.exception('Erro ao processar frame WebSocket')
+                ws.send(json.dumps({
+                    'erro': str(e),
+                    'deteccoes': [],
+                    'total': 0,
+                    'ms': 0,
+                }))
+                continue
 
             frame_count += 1
             if frame_count % 30 == 0:
                 logger.info(f'{frame_count} frames processados | último: {resultado.get("ms")}ms')
     except Exception as e:
-        logger.info(f'Cliente desconectado: {e}')
+        logger.exception(f'WebSocket encerrado: {e}')
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -509,8 +685,9 @@ def health():
             "status": "saudavel",
             "servicos": {
                 "detector_yolo": occhio.detector_objetos is not None,
-                "openai_interpreter": occhio.openai_disponivel,
-                "modelo": "YOLOv8s"
+                "glm_interpreter": getattr(occhio.interpreter, 'glm_disponivel', False),
+                "whisper": occhio.whisper_disponivel,
+                "modelo": "YOLOv8s + glm-5"
             }
         })
     except Exception as e:
@@ -633,6 +810,18 @@ def estatistica():
         }), 500
 
 # ========== EXECUÇÃO ==========
+
+def _warmup_em_background():
+    """Carrega YOLO/GLM no boot para evitar timeout no primeiro frame."""
+    try:
+        logger.info('🔧 Warmup: carregando Occhio em background…')
+        get_occhio_instance()
+        logger.info('✅ Warmup concluído')
+    except Exception as e:
+        logger.error(f'❌ Warmup falhou: {e}')
+
+
+threading.Thread(target=_warmup_em_background, daemon=True).start()
 
 if __name__ == "__main__":
     porta = int(os.getenv('PORT', '8080'))

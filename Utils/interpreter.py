@@ -8,40 +8,34 @@ import time
 import numpy as np
 from datetime import datetime, timezone, timedelta
 
+from Utils.glm_client import chat as glm_chat, glm_disponivel as glm_api_disponivel
+
 logger = logging.getLogger(__name__)
 
 class Interpreter:
-    def __init__(self, model_name="gpt-4o-mini", api_key=None):
-        self.model_name = model_name
-        self.openai_disponivel = False  # Mudei de openai_available para openai_disponivel
+    def __init__(self, model_name=None, api_key=None):
+        self.model_name = model_name or os.getenv('GLM_MODEL', 'glm-5')
+        self.glm_disponivel = False
         
         logger.info("🔄 Inicializando Interpreter...")
         
-        # Verificar API key
-        if api_key and isinstance(api_key, str) and api_key.strip():
-            logger.info(f"📦 API key recebida: {len(api_key)} caracteres")
-            
+        if glm_api_disponivel():
+            logger.info("📦 ZAI API key encontrada")
             try:
-                import openai
-                openai.api_key = api_key
-                
-                # Testar conexão
-                logger.info("🧪 Testando conexão OpenAI...")
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
+                logger.info("🧪 Testando conexão GLM...")
+                glm_chat(
                     messages=[{"role": "user", "content": "Teste"}],
-                    max_tokens=5
+                    model=self.model_name,
+                    max_tokens=5,
                 )
-                
-                self.openai_disponivel = True
-                logger.info("✅ OpenAI conectado")
-                
+                self.glm_disponivel = True
+                logger.info("✅ GLM conectado")
             except Exception as e:
-                logger.error(f"❌ Erro OpenAI: {e}")
-                self.openai_disponivel = False
+                logger.error(f"❌ Erro GLM: {e}")
+                self.glm_disponivel = False
         else:
-            logger.warning("⚠️ Sem API key válida - modo local")
-            self.openai_disponivel = False
+            logger.warning("⚠️ Sem ZAI_API_KEY válida - modo local")
+            self.glm_disponivel = False
         
         # Dicionário de tradução
         self.traducoes = {
@@ -104,11 +98,9 @@ class Interpreter:
         # Preparar dados no formato correto
         dados_texto = self._formatar_dados_compativel(objetos_detectados)
         
-        if self.openai_disponivel:
+        if self.glm_disponivel:
             try:
-                import openai
-                
-                response = openai.ChatCompletion.create(
+                return glm_chat(
                     model=self.model_name,
                     messages=[
                         {
@@ -132,10 +124,8 @@ INSTRUÇÕES:
                     temperature=0.6,
                 )
                 
-                return response.choices[0].message.content.strip()
-                
             except Exception as e:
-                logger.error(f"❌ Erro OpenAI: {e}")
+                logger.error(f"❌ Erro GLM: {e}")
                 return self._descricao_local(objetos_detectados)
         else:
             return self._descricao_local(objetos_detectados)
@@ -190,10 +180,8 @@ INSTRUÇÕES:
         # Preparar dados
         dados_texto = self._formatar_dados_compativel(objetos_detectados)
         
-        if self.openai_disponivel:
+        if self.glm_disponivel:
             try:
-                import openai
-                
                 # Analisar se é sobre imagem
                 pergunta_lower = pergunta.lower()
                 sobre_imagem = any(palavra in pergunta_lower for palavra in [
@@ -220,7 +208,7 @@ REGRAS:
 
 RESPONDA:"""
                 
-                response = openai.ChatCompletion.create(
+                resposta = glm_chat(
                     model=self.model_name,
                     messages=[
                         {"role": "system", "content": prompt},
@@ -229,8 +217,6 @@ RESPONDA:"""
                     max_tokens=200,
                     temperature=0.7,
                 )
-                
-                resposta = response.choices[0].message.content.strip()
                 tempo_ms = int((time.time() - inicio_tempo) * 1000)
                 
                 # Detecções relevantes (top 3 por confiança)
@@ -262,7 +248,7 @@ RESPONDA:"""
                 }
                 
             except Exception as e:
-                logger.error(f"❌ Erro OpenAI: {e}")
+                logger.error(f"❌ Erro GLM: {e}")
                 return self._resposta_local(pergunta, objetos_detectados, inicio_tempo)
         else:
             return self._resposta_local(pergunta, objetos_detectados, inicio_tempo)
