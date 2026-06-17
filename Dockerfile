@@ -27,12 +27,11 @@ RUN mkdir -p debug_frames rostos logs
 
 # Configurar variáveis de ambiente
 ENV PYTHONPATH=/app
-ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 ENV OMP_NUM_THREADS=1
 ENV MKL_NUM_THREADS=1
 
+# Railway injeta PORT automaticamente
 EXPOSE 8080
 
-# Comando de inicialização
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 120 main:app
+CMD exec gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --bind 0.0.0.0:${PORT:-8080} --workers 1 --timeout 120 main:app

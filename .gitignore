@@ -1,0 +1,44 @@
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs e dados locais
+*.log
+logs/
+debug_frames/
+rostos/
+temp/
+tmp/
+
+# Modelos (baixados em runtime)
+*.pt
+*.weights
+
+# Banco local
+*.db
+*.sqlite3
+
+# IDE e SO
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

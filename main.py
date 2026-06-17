@@ -6,10 +6,13 @@ import os
 import cv2
 import logging
 import time
+import json
 import numpy as np
 import threading
 import base64
+from pathlib import Path
 from flask import Flask, jsonify, request
+from flask_sock import Sock
 from typing import Dict, List, Any, Optional
 
 # ================== CONFIGURAÇÃO ==================
@@ -32,6 +35,9 @@ logging.basicConfig(
 logger = logging.getLogger("Occhio-Cloud")
 
 app = Flask(__name__)
+sock = Sock(app)
+
+DASHBOARD_HTML = Path(__file__).parent / 'occhio_dashboard.html'
 
 # Cache para singleton
 _occhio_instance = None
@@ -382,6 +388,46 @@ class OcchioCloud:
                 "erro": str(e)
             }
 
+    def processar_stream(self, dados_imagem: str, confidence_threshold: float = 0.45) -> Dict[str, Any]:
+        """Processa frame para streaming WebSocket — retorna bbox normalizadas (x, y, w, h)."""
+        inicio = time.time()
+        try:
+            frame = self._decodificar_imagem(dados_imagem)
+            altura, largura = frame.shape[:2]
+
+            if largura > 640:
+                escala = 640 / largura
+                frame = cv2.resize(frame, (640, int(altura * escala)), interpolation=cv2.INTER_AREA)
+                altura, largura = frame.shape[:2]
+
+            deteccoes = []
+            if self.detector_objetos and hasattr(self.detector_objetos, 'detectar_com_bbox'):
+                brutas = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=confidence_threshold)
+                for det in brutas:
+                    bbox = det.get('bbox', {})
+                    x = bbox.get('x', 0)
+                    y = bbox.get('y', 0)
+                    w = bbox.get('width', 0)
+                    h = bbox.get('height', 0)
+                    deteccoes.append({
+                        'nome': det.get('class', '?'),
+                        'confianca': round(float(det.get('confidence', 0)), 2),
+                        'x': round(x / largura, 4),
+                        'y': round(y / altura, 4),
+                        'w': round(w / largura, 4),
+                        'h': round(h / altura, 4),
+                    })
+
+            return {
+                'deteccoes': deteccoes,
+                'total': len(deteccoes),
+                'ms': int((time.time() - inicio) * 1000),
+                'resolucao': f'{largura}x{altura}',
+            }
+        except Exception as e:
+            logger.error(f'Erro no stream: {e}')
+            return {'erro': str(e), 'deteccoes': [], 'total': 0, 'ms': 0}
+
 # Singleton
 def get_occhio_instance():
     global _occhio_instance
@@ -395,6 +441,14 @@ def get_occhio_instance():
 # ========== ROTAS FLASK ==========
 
 @app.route('/')
+def dashboard():
+    """Dashboard de demonstração com câmera em tempo real."""
+    if DASHBOARD_HTML.exists():
+        return DASHBOARD_HTML.read_text(encoding='utf-8')
+    return jsonify({'erro': 'Dashboard não encontrado'}), 404
+
+
+@app.route('/api')
 def index():
     return jsonify({
         "app": "Occhio Cloud API",
@@ -402,13 +456,48 @@ def index():
         "status": "online",
         "timestamp": int(time.time() * 1000),
         "rotas": {
-            "/": "GET - Esta página",
+            "/": "GET - Dashboard ao vivo",
+            "/api": "GET - Esta página",
             "/health": "GET - Health check",
+            "/stream": "WS - Stream de vídeo em tempo real",
             "/processar": "POST - Processa imagem",
             "/perguntar": "POST - Pergunta sobre imagem",
             "/estatistica": "POST - Estatísticas da imagem"
         }
     })
+
+
+@sock.route('/stream')
+def stream_ws(ws):
+    """WebSocket: browser envia frames, servidor devolve bounding boxes."""
+    logger.info('Cliente conectado via WebSocket')
+    frame_count = 0
+    try:
+        while True:
+            mensagem = ws.receive()
+            if mensagem is None:
+                break
+            try:
+                dados = json.loads(mensagem)
+            except json.JSONDecodeError:
+                ws.send(json.dumps({'erro': 'JSON inválido'}))
+                continue
+
+            frame_b64 = dados.get('frame')
+            if not frame_b64:
+                ws.send(json.dumps({'erro': "Campo 'frame' não encontrado"}))
+                continue
+
+            threshold = float(dados.get('threshold', 0.45))
+            occhio = get_occhio_instance()
+            resultado = occhio.processar_stream(frame_b64, confidence_threshold=threshold)
+            ws.send(json.dumps(resultado))
+
+            frame_count += 1
+            if frame_count % 30 == 0:
+                logger.info(f'{frame_count} frames processados | último: {resultado.get("ms")}ms')
+    except Exception as e:
+        logger.info(f'Cliente desconectado: {e}')
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -548,15 +637,12 @@ def estatistica():
 if __name__ == "__main__":
     porta = int(os.getenv('PORT', '8080'))
     logger.info(f"🚀 Iniciando Occhio Cloud v5.0 na porta {porta}")
-    
-    # Inicializar antecipadamente
+    logger.info(f"   Dashboard: http://localhost:{porta}/")
+    logger.info(f"   WebSocket: ws://localhost:{porta}/stream")
+
     logger.info("🔧 Inicializando componentes...")
     get_occhio_instance()
-    
-    try:
-        from waitress import serve
-        logger.info(f"🌐 Servindo com Waitress na porta {porta}...")
-        serve(app, host='0.0.0.0', port=porta, threads=8)
-    except ImportError:
-        logger.info(f"🌐 Servindo com Flask na porta {porta}...")
-        app.run(host='0.0.0.0', port=porta, debug=False, threaded=True)
+
+    # Flask dev server suporta WebSocket (Waitress não suporta)
+    logger.info(f"🌐 Servindo com Flask (WebSocket habilitado) na porta {porta}...")
+    app.run(host='0.0.0.0', port=porta, debug=False, threaded=True)
