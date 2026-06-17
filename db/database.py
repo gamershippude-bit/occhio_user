@@ -141,6 +141,7 @@ class DatabaseManager:
         relacao: str = "conhecido",
         user: Optional[int] = None,
         label: Optional[str] = None,
+        avisar: bool = True,
     ) -> bool:
         """Salva um rosto detectado no banco de dados."""
         with self._lock:
@@ -148,8 +149,8 @@ class DatabaseManager:
                 encoding_bytes = pickle.dumps(face_encoding)
                 sql = """
                 INSERT INTO user_rec_facial 
-                    (imgVetor, imgNome, imgData, imgRelacao, imgUser, imgLabel)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (imgVetor, imgNome, imgData, imgRelacao, imgUser, imgLabel, avisar)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """
                 valores = (
                     encoding_bytes,
@@ -157,7 +158,8 @@ class DatabaseManager:
                     datetime.now(),
                     relacao,
                     user if user is not None else 0,
-                    label if label else nome,  # Usa nome como label se não fornecido
+                    label if label else nome,
+                    1 if avisar else 0,
                 )
 
                 cursor = self._get_cursor()
@@ -165,7 +167,7 @@ class DatabaseManager:
                 self.conn.commit()
                 cursor.close()
 
-                logger.info(f"✅ Rosto salvo com sucesso: Nome='{nome}'")
+                logger.info(f"✅ Rosto salvo com sucesso: Nome='{nome}' avisar={avisar}")
                 return True
 
             except Exception as e:
@@ -233,3 +235,31 @@ class DatabaseManager:
                 if self.conn:
                     self.conn.rollback()
                 return False
+
+    def get_nomes_com_aviso(self) -> List[str]:
+        """Nomes de pessoas cadastradas com aviso ativo."""
+        with self._lock:
+            try:
+                cursor = self._get_cursor()
+                cursor.execute("SELECT imgNome FROM user_rec_facial WHERE avisar = 1")
+                nomes = [row[0] for row in cursor.fetchall()]
+                cursor.close()
+                return nomes
+            except Exception as e:
+                logger.error(f"❌ Erro ao listar avisos: {e}")
+                return []
+
+    def get_relacao(self, nome: str) -> Optional[str]:
+        with self._lock:
+            try:
+                cursor = self._get_cursor()
+                cursor.execute(
+                    "SELECT imgRelacao FROM user_rec_facial WHERE imgNome = %s ORDER BY imgID DESC LIMIT 1",
+                    (nome,),
+                )
+                row = cursor.fetchone()
+                cursor.close()
+                return row[0] if row else None
+            except Exception as e:
+                logger.error(f"❌ Erro ao buscar relação: {e}")
+                return None

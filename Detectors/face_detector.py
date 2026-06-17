@@ -229,3 +229,69 @@ class FaceDetector:
             "tolerance": self.tolerance,
             "min_confidence": self.min_confidence
         }
+
+    def extrair_encoding_principal(self, frame):
+        """Extrai encoding do maior rosto no frame."""
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb, model='hog')
+            if not locations:
+                return None, 'Nenhum rosto detectado. Posicione a pessoa de frente para a câmera.'
+
+            def area(loc):
+                top, right, bottom, left = loc
+                return (bottom - top) * (right - left)
+
+            locations = sorted(locations, key=area, reverse=True)
+            encodings = face_recognition.face_encodings(rgb, [locations[0]])
+            if not encodings:
+                return None, 'Não consegui capturar o rosto com qualidade suficiente.'
+
+            encoding = encodings[0]
+            ok, msg = self.verificar_encoding_qualidade(encoding)
+            if not ok:
+                return None, msg
+            return encoding, None
+        except Exception as e:
+            logger.error(f'Erro ao extrair encoding: {e}')
+            return None, 'Erro ao processar o rosto.'
+
+    def detectar_faces_bbox(self, frame):
+        """Detecta rostos e retorna bbox normalizadas para o canvas."""
+        try:
+            altura, largura = frame.shape[:2]
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb, model='hog')
+            if not locations:
+                return []
+
+            encodings = face_recognition.face_encodings(rgb, locations)
+            resultado = []
+
+            for (top, right, bottom, left), face_encoding in zip(locations, encodings):
+                nome = 'Desconhecido'
+                confianca = 0.0
+
+                if self.known_face_encodings:
+                    distances = face_recognition.face_distance(self.known_face_encodings, face_encoding)
+                    best = int(np.argmin(distances))
+                    dist = float(distances[best])
+                    confianca = max(0.0, 1.0 - dist)
+                    if dist <= self.tolerance and confianca >= self.min_confidence:
+                        nome = self.known_face_names[best]
+
+                w = right - left
+                h = bottom - top
+                resultado.append({
+                    'nome': nome,
+                    'confianca': round(confianca, 2),
+                    'conhecido': nome != 'Desconhecido',
+                    'x': round(left / largura, 4),
+                    'y': round(top / altura, 4),
+                    'w': round(w / largura, 4),
+                    'h': round(h / altura, 4),
+                })
+            return resultado
+        except Exception as e:
+            logger.error(f'Erro em detectar_faces_bbox: {e}')
+            return []

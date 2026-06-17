@@ -491,7 +491,21 @@
 <script>
 const WS_PROTO = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const WS_URL = `${WS_PROTO}//${location.host}/stream`;
-const TARGET_SEND_FPS = 10;
+const TARGET_SEND_FPS = 12;
+const MIN_GRAVACAO_MS = 800;
+const LERP_FATOR = 0.55;
+
+const NOMES_PT = {
+  person: 'pessoa', chair: 'cadeira', table: 'mesa', laptop: 'computador',
+  tv: 'televisão', 'cell phone': 'celular', book: 'livro', bottle: 'garrafa',
+  cup: 'copo', car: 'carro', bicycle: 'bicicleta', dog: 'cachorro', cat: 'gato',
+  keyboard: 'teclado', mouse: 'mouse', couch: 'sofá', bed: 'cama',
+  'dining table': 'mesa', backpack: 'mochila', handbag: 'bolsa',
+};
+
+function nomePT(nome) {
+  return NOMES_PT[nome?.toLowerCase()] || nome;
+}
 
 function classColor(nome) {
   let hash = 0;
@@ -500,12 +514,46 @@ function classColor(nome) {
   return `hsl(${hue}, 85%, 60%)`;
 }
 
+function corComAlpha(hsl, alpha) {
+  const m = hsl.match(/hsl\((\d+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+  if (m) return `hsla(${m[1]}, ${m[2]}%, ${m[3]}%, ${alpha})`;
+  return hsl;
+}
+
+function desenharRotulo(ctx, texto, x, y, cor, acima = true) {
+  ctx.font = '600 13px Inter, sans-serif';
+  const tw = ctx.measureText(texto).width;
+  const pad = 6;
+  const lh = 20;
+  const ly = acima ? y - lh : y;
+  const fillCor = cor.startsWith('#') ? cor : corComAlpha(cor, 0.85);
+  ctx.fillStyle = fillCor;
+  ctx.fillRect(x, ly, tw + pad * 2, lh);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(texto, x + pad, ly + 14);
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function interpolarCaixas(atual, alvo, fator) {
+  if (!alvo.length) return [];
+  if (!atual.length || atual.length !== alvo.length) return alvo.map(b => ({ ...b }));
+  return alvo.map((b, i) => ({
+    ...b,
+    x: lerp(atual[i].x, b.x, fator),
+    y: lerp(atual[i].y, b.y, fator),
+    w: lerp(atual[i].w, b.w, fator),
+    h: lerp(atual[i].h, b.h, fator),
+  }));
+}
+
 let ws = null;
 let stream = null;
 let rafId = null;
 let sendLoop = null;
 let lastDeteccoesRaw = [];
 let lastDeteccoes = [];
+let lastRostos = [];
 let frameCount = 0;
 let fpsTs = performance.now();
 let fpsDisplay = 0;
@@ -516,6 +564,12 @@ let audioChunks = [];
 let audioStream = null;
 let gravando = false;
 let processandoVoz = false;
+let aguardandoFrame = false;
+let gravacaoInicio = 0;
+let detAlvo = [];
+let rostAlvo = [];
+let detRender = [];
+let rostRender = [];
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -587,13 +641,33 @@ function conectarWS() {
         if (data.audio_b64) {
           tocarAudio(data.audio_b64);
         } else if (data.resposta) {
-          log('Áudio indisponível — resposta exibida em texto', 'info');
+          const msg = data.audio_erro
+            ? `Áudio indisponível: ${data.audio_erro}`
+            : 'Áudio indisponível — resposta exibida em texto';
+          log(msg, 'info');
+        }
+        if (data.cadastro_ativo) {
+          log('Cadastro de pessoa em andamento…', 'info');
         }
         return;
       }
 
+      if (data.tipo === 'alerta_pessoa') {
+        log(data.mensagem || `Reconheci ${data.nome}`, 'ok');
+        if (data.mensagem) {
+          respostaText.textContent = data.mensagem;
+          respostaText.classList.remove('empty');
+        }
+        if (data.audio_b64) tocarAudio(data.audio_b64);
+        return;
+      }
+
       lastDeteccoesRaw = data.deteccoes || [];
+      lastRostos = data.rostos || [];
       lastDeteccoes = lastDeteccoesRaw.filter(d => d.confianca >= threshold);
+      detAlvo = lastDeteccoes;
+      rostAlvo = lastRostos;
+      aguardandoFrame = false;
       msVal.textContent = data.ms ?? '—';
       resVal.textContent = data.resolucao ?? '—';
       totalCount.textContent = lastDeteccoes.length;
@@ -654,6 +728,12 @@ function pararCamera() {
   video.srcObject = null;
   lastDeteccoesRaw = [];
   lastDeteccoes = [];
+  lastRostos = [];
+  detAlvo = [];
+  rostAlvo = [];
+  detRender = [];
+  rostRender = [];
+  aguardandoFrame = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   camPill.classList.remove('live');
@@ -682,7 +762,10 @@ function iniciarRenderLoop() {
     canvas.height = Math.round(vH * scale);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    for (const det of lastDeteccoes) {
+    detRender = interpolarCaixas(detRender, detAlvo, LERP_FATOR);
+    rostRender = interpolarCaixas(rostRender, rostAlvo, LERP_FATOR);
+
+    for (const det of detRender) {
       const x = det.x * canvas.width;
       const y = det.y * canvas.height;
       const w = det.w * canvas.width;
@@ -693,13 +776,23 @@ function iniciarRenderLoop() {
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
 
-      const label = `${det.nome}  ${Math.round(det.confianca * 100)}%`;
-      ctx.font = '600 12px Inter, sans-serif';
-      const tw = ctx.measureText(label).width;
-      ctx.fillStyle = cor + 'cc';
-      ctx.fillRect(x, y - 20, tw + 12, 20);
-      ctx.fillStyle = '#000';
-      ctx.fillText(label, x + 6, y - 5);
+      const label = `${nomePT(det.nome)}  ${Math.round(det.confianca * 100)}%`;
+      desenharRotulo(ctx, label, x, Math.max(y, 20), cor, true);
+    }
+
+    for (const face of rostRender) {
+      const x = face.x * canvas.width;
+      const y = face.y * canvas.height;
+      const w = face.w * canvas.width;
+      const h = face.h * canvas.height;
+      const cor = face.conhecido ? '#39d98a' : '#a78bfa';
+      ctx.strokeStyle = cor;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, w, h);
+      const label = face.conhecido
+        ? `${face.nome}  ${Math.round(face.confianca * 100)}%`
+        : 'Rosto desconhecido';
+      desenharRotulo(ctx, label, x, y + h + 2, cor, false);
     }
 
     frameCount++;
@@ -722,13 +815,15 @@ function iniciarEnvioFrames() {
   sendLoop = setInterval(() => {
     if (!wsReady || !stream || video.readyState < 2) return;
     if (ws.readyState !== WebSocket.OPEN) return;
+    if (aguardandoFrame) return;
 
     offscreen.width = 640;
     offscreen.height = Math.round(640 * (video.videoHeight / video.videoWidth)) || 360;
     const octx = offscreen.getContext('2d');
     octx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
 
-    const b64 = offscreen.toDataURL('image/jpeg', 0.75).split(',')[1];
+    const b64 = offscreen.toDataURL('image/jpeg', 0.7).split(',')[1];
+    aguardandoFrame = true;
     ws.send(JSON.stringify({ frame: b64, threshold }));
   }, intervalo);
 }
@@ -756,7 +851,7 @@ function atualizarListaDeteccoes(dets) {
         <div class="det-color" style="background:${cor}"></div>
         <div style="flex:1">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <span class="det-name">${d.nome}${qtd}</span>
+            <span class="det-name">${nomePT(d.nome)}${qtd}</span>
             <span class="det-conf">${pct}%</span>
           </div>
           <div class="det-bar-wrap">
@@ -780,7 +875,8 @@ async function iniciarGravacao() {
     audioChunks = [];
     mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = enviarAudio;
-    mediaRecorder.start();
+    mediaRecorder.start(250);
+    gravacaoInicio = Date.now();
     gravando = true;
     btnPerguntar.classList.add('recording');
     recordingIndicator.classList.add('active');
@@ -792,27 +888,57 @@ async function iniciarGravacao() {
 
 function pararGravacao(cancelar = false) {
   if (!gravando || !mediaRecorder) return;
-  gravando = false;
-  btnPerguntar.classList.remove('recording');
-  recordingIndicator.classList.remove('active');
+
+  const finalizar = () => {
+    gravando = false;
+    btnPerguntar.classList.remove('recording');
+    recordingIndicator.classList.remove('active');
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.requestData();
+      mediaRecorder.stop();
+    }
+  };
+
   if (cancelar) {
     mediaRecorder.onstop = null;
-    if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    finalizar();
     audioChunks = [];
     return;
   }
-  if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+
+  const elapsed = Date.now() - gravacaoInicio;
+  if (elapsed < MIN_GRAVACAO_MS) {
+    log('Segure um pouco mais…', 'info');
+    setTimeout(finalizar, MIN_GRAVACAO_MS - elapsed);
+    return;
+  }
+  finalizar();
 }
 
 function enviarAudio() {
-  if (audioChunks.length === 0) return;
-  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) {
-    log('WebSocket desconectado — não foi possível enviar áudio', 'err');
+  if (audioChunks.length === 0) {
+    processandoVoz = false;
+    btnPerguntar.disabled = false;
+    log('Nenhum áudio capturado. Tente novamente.', 'err');
     return;
   }
 
   const blob = new Blob(audioChunks, { type: 'audio/webm' });
   audioChunks = [];
+
+  if (blob.size < 1200) {
+    processandoVoz = false;
+    btnPerguntar.disabled = false;
+    log('Gravação muito curta. Segure o botão por pelo menos 1 segundo.', 'err');
+    return;
+  }
+  if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) {
+    processandoVoz = false;
+    btnPerguntar.disabled = false;
+    log('WebSocket desconectado — não foi possível enviar áudio', 'err');
+    return;
+  }
+
   processandoVoz = true;
   btnPerguntar.disabled = true;
   respostaText.textContent = 'Processando…';
@@ -860,6 +986,7 @@ threshSlider.addEventListener('input', () => {
   threshold = threshSlider.value / 100;
   threshLabel.textContent = `${threshSlider.value}%`;
   lastDeteccoes = lastDeteccoesRaw.filter(d => d.confianca >= threshold);
+  detAlvo = lastDeteccoes;
   totalCount.textContent = lastDeteccoes.length;
   atualizarListaDeteccoes(lastDeteccoes);
 });

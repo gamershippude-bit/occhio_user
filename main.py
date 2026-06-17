@@ -17,6 +17,8 @@ from flask_sock import Sock
 from typing import Dict, List, Any, Optional
 
 from Utils.glm_client import chat as glm_chat, glm_disponivel
+from Utils.face_registry import FaceRegistry, CadastroSessao
+from Utils.face_store import criar_face_store
 
 # Limpar variáveis de proxy
 for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy']:
@@ -63,8 +65,14 @@ class OcchioCloud:
             # Inicializar componentes
             self.detector_objetos = None
             self.interpreter = None
+            self._stream_face_counter = 0
+            self._last_rostos = []
+            self.detector_faces = None
+            self.face_store = None
+            self.face_registry = None
             
             self._inicializar_yolo()
+            self._inicializar_faces()
             self._inicializar_interpreter()
             self.glm_disponivel = getattr(self.interpreter, 'glm_disponivel', False)
             
@@ -83,6 +91,21 @@ class OcchioCloud:
         except Exception as e:
             logger.error(f"❌ Erro ao inicializar YOLO: {e}")
             self.detector_objetos = self._criar_detector_local()
+    
+    def _inicializar_faces(self):
+        """Inicializa reconhecimento facial e banco de rostos."""
+        try:
+            from Detectors.face_detector import FaceDetector
+            self.detector_faces = FaceDetector()
+            self.face_store = criar_face_store()
+            self.face_registry = FaceRegistry(self.detector_faces, self.face_store)
+            self.face_registry.recarregar_rostos()
+            logger.info('✅ Reconhecimento facial inicializado')
+        except Exception as e:
+            logger.error(f'❌ Erro ao inicializar faces: {e}')
+            self.detector_faces = None
+            self.face_store = None
+            self.face_registry = None
     
     def _inicializar_interpreter(self):
         """Inicializa interpreter"""
@@ -123,6 +146,9 @@ class OcchioCloud:
     def _setup_modo_emergencia(self):
         """Setup de emergência"""
         self.detector_objetos = self._criar_detector_local()
+        self.detector_faces = None
+        self.face_store = None
+        self.face_registry = None
         self.interpreter = self._criar_interpreter_local()
         self.glm_disponivel = False
         self.whisper_disponivel = False
@@ -395,7 +421,7 @@ class OcchioCloud:
             }
 
     def processar_stream(self, dados_imagem: str, confidence_threshold: float = 0.45) -> Dict[str, Any]:
-        """Processa frame para streaming WebSocket — retorna bbox normalizadas (x, y, w, h)."""
+        """Processa frame para streaming WebSocket — objetos YOLO + rostos."""
         inicio = time.time()
         try:
             frame = self._decodificar_imagem(dados_imagem)
@@ -424,15 +450,29 @@ class OcchioCloud:
                         'h': round(h / altura, 4),
                     })
 
+            rostos = self._last_rostos
+            alertas = []
+            if self.face_registry:
+                self._stream_face_counter += 1
+                if self._stream_face_counter % 2 == 0:
+                    face_w = 320
+                    face_h = max(1, int(altura * face_w / largura))
+                    face_frame = cv2.resize(frame, (face_w, face_h), interpolation=cv2.INTER_AREA)
+                    rostos = self.face_registry.detectar_faces_stream(face_frame)
+                    self._last_rostos = rostos
+                    alertas = self.face_registry.verificar_alertas(rostos)
+
             return {
                 'deteccoes': deteccoes,
+                'rostos': rostos,
+                'alertas': alertas,
                 'total': len(deteccoes),
                 'ms': int((time.time() - inicio) * 1000),
                 'resolucao': f'{largura}x{altura}',
             }
         except Exception as e:
             logger.error(f'Erro no stream: {e}')
-            return {'erro': str(e), 'deteccoes': [], 'total': 0, 'ms': 0}
+            return {'erro': str(e), 'deteccoes': [], 'rostos': [], 'alertas': [], 'total': 0, 'ms': 0}
 
 # ========== VOZ (Whisper + GLM-5 + ElevenLabs) ==========
 
@@ -544,30 +584,78 @@ def sintetizar_voz(texto: str) -> bytes:
     return b''.join(audio_generator)
 
 
-def processar_pergunta_voz(audio_b64: str, deteccoes_atuais: list) -> dict:
+def processar_pergunta_voz(
+    audio_b64: str,
+    deteccoes_atuais: list,
+    frame_b64: Optional[str] = None,
+    cadastro_sessao: Optional[CadastroSessao] = None,
+) -> dict:
     audio_bytes = base64.b64decode(audio_b64)
 
-    transcricao = transcrever_audio(audio_bytes)
+    if len(audio_bytes) < 1200:
+        return {
+            'transcricao': '',
+            'resposta': 'Gravação muito curta. Segure o botão por pelo menos 1 segundo.',
+            'audio_b64': None,
+            'cadastro_ativo': cadastro_sessao.em_andamento() if cadastro_sessao else False,
+        }
+
+    try:
+        transcricao = transcrever_audio(audio_bytes)
+    except Exception as e:
+        err = str(e)
+        if 'too short' in err.lower():
+            return {
+                'transcricao': '',
+                'resposta': 'Gravação muito curta. Segure o botão por pelo menos 1 segundo.',
+                'audio_b64': None,
+                'cadastro_ativo': cadastro_sessao.em_andamento() if cadastro_sessao else False,
+            }
+        raise
     if not transcricao:
         return {
             'transcricao': '',
             'resposta': 'Não consegui entender sua pergunta. Tente falar novamente.',
             'audio_b64': None,
+            'cadastro_ativo': False,
         }
 
-    resposta = gerar_resposta_voz(transcricao, deteccoes_atuais)
+    occhio = get_occhio_instance()
+    resposta = None
+    cadastro_ativo = False
+
+    if cadastro_sessao and occhio.face_registry:
+        frame = None
+        if frame_b64:
+            try:
+                frame = occhio._decodificar_imagem(frame_b64)
+            except Exception:
+                pass
+        resposta_cadastro = occhio.face_registry.processar_mensagem(
+            cadastro_sessao, transcricao, frame=frame
+        )
+        if resposta_cadastro:
+            resposta = resposta_cadastro
+            cadastro_ativo = cadastro_sessao.em_andamento()
+
+    if resposta is None:
+        resposta = gerar_resposta_voz(transcricao, deteccoes_atuais)
 
     audio_b64_out = None
+    audio_erro = None
     try:
         audio_mp3 = sintetizar_voz(resposta)
         audio_b64_out = base64.b64encode(audio_mp3).decode('ascii')
     except Exception as e:
+        audio_erro = str(e)
         logger.error(f'ElevenLabs falhou (resposta em texto mantida): {e}')
 
     return {
         'transcricao': transcricao,
         'resposta': resposta,
         'audio_b64': audio_b64_out,
+        'audio_erro': audio_erro,
+        'cadastro_ativo': cadastro_ativo,
     }
 
 
@@ -602,6 +690,7 @@ def index():
             "/api": "GET - Esta página",
             "/health": "GET - Health check",
             "/stream": "WS - Stream de vídeo em tempo real",
+            "/rostos": "GET - Lista rostos cadastrados",
             "/processar": "POST - Processa imagem",
             "/perguntar": "POST - Pergunta sobre imagem",
             "/estatistica": "POST - Estatísticas da imagem"
@@ -615,6 +704,8 @@ def stream_ws(ws):
     logger.info('Cliente conectado via WebSocket')
     frame_count = 0
     deteccoes_atuais = []
+    ultimo_frame_b64 = None
+    cadastro_sessao = CadastroSessao()
     try:
         while True:
             mensagem = ws.receive()
@@ -635,7 +726,12 @@ def stream_ws(ws):
                     }))
                     continue
                 try:
-                    resultado = processar_pergunta_voz(audio_b64, deteccoes_atuais)
+                    resultado = processar_pergunta_voz(
+                        audio_b64,
+                        deteccoes_atuais,
+                        frame_b64=ultimo_frame_b64,
+                        cadastro_sessao=cadastro_sessao,
+                    )
                     ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
                 except Exception as e:
                     logger.error(f'Erro ao processar pergunta de voz: {e}')
@@ -645,6 +741,7 @@ def stream_ws(ws):
                         'transcricao': '',
                         'resposta': 'Ocorreu um erro ao processar sua pergunta.',
                         'audio_b64': None,
+                        'cadastro_ativo': cadastro_sessao.em_andamento(),
                     }))
                 continue
 
@@ -653,17 +750,35 @@ def stream_ws(ws):
                 ws.send(json.dumps({'erro': "Campo 'frame' não encontrado"}))
                 continue
 
+            ultimo_frame_b64 = frame_b64
             threshold = float(dados.get('threshold', 0.45))
             try:
                 occhio = get_occhio_instance()
                 resultado = occhio.processar_stream(frame_b64, confidence_threshold=threshold)
                 deteccoes_atuais = resultado.get('deteccoes', [])
+
+                for alerta in resultado.get('alertas', []):
+                    msg = alerta.get('mensagem', '')
+                    audio_alert = None
+                    try:
+                        audio_alert = base64.b64encode(sintetizar_voz(msg)).decode('ascii')
+                    except Exception:
+                        pass
+                    ws.send(json.dumps({
+                        'tipo': 'alerta_pessoa',
+                        'nome': alerta.get('nome'),
+                        'relacao': alerta.get('relacao'),
+                        'mensagem': msg,
+                        'audio_b64': audio_alert,
+                    }))
+
                 ws.send(json.dumps(resultado))
             except Exception as e:
                 logger.exception('Erro ao processar frame WebSocket')
                 ws.send(json.dumps({
                     'erro': str(e),
                     'deteccoes': [],
+                    'rostos': [],
                     'total': 0,
                     'ms': 0,
                 }))
@@ -685,6 +800,8 @@ def health():
             "status": "saudavel",
             "servicos": {
                 "detector_yolo": occhio.detector_objetos is not None,
+                "detector_faces": occhio.detector_faces is not None,
+                "face_database": occhio.face_store is not None,
                 "glm_interpreter": getattr(occhio.interpreter, 'glm_disponivel', False),
                 "whisper": occhio.whisper_disponivel,
                 "modelo": "YOLOv8s + glm-5"
@@ -780,6 +897,17 @@ def perguntar():
             "erro": str(e),
             "codigo": "ERRO_SERVIDOR"
         }), 500
+
+@app.route('/rostos', methods=['GET'])
+def listar_rostos():
+    try:
+        occhio = get_occhio_instance()
+        if not occhio.face_store:
+            return jsonify({'sucesso': False, 'erro': 'Armazenamento de rostos indisponível'}), 503
+        faces = occhio.face_store.list_faces()
+        return jsonify({'sucesso': True, 'total': len(faces), 'rostos': faces})
+    except Exception as e:
+        return jsonify({'sucesso': False, 'erro': str(e)}), 500
 
 @app.route('/estatistica', methods=['POST'])
 def estatistica():
