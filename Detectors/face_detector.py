@@ -230,6 +230,16 @@ class FaceDetector:
             "min_confidence": self.min_confidence
         }
 
+    def contar_rostos(self, frame) -> int:
+        """Conta quantos rostos aparecem no frame."""
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = face_recognition.face_locations(rgb, model='hog')
+            return len(locations)
+        except Exception as e:
+            logger.error(f'Erro ao contar rostos: {e}')
+            return 0
+
     def extrair_encoding_principal(self, frame):
         """Extrai encoding do maior rosto no frame."""
         try:
@@ -237,6 +247,11 @@ class FaceDetector:
             locations = face_recognition.face_locations(rgb, model='hog')
             if not locations:
                 return None, 'Nenhum rosto detectado. Posicione a pessoa de frente para a câmera.'
+            if len(locations) > 1:
+                return None, (
+                    f'Estou vendo {len(locations)} rostos na câmera. '
+                    'Enquadre apenas uma pessoa para cadastrar.'
+                )
 
             def area(loc):
                 top, right, bottom, left = loc

@@ -477,15 +477,17 @@ class OcchioCloud:
 # ========== VOZ (Whisper + GLM-5 + ElevenLabs) ==========
 
 SYSTEM_PROMPT_VOZ = """Você é o Occhio, um assistente de acessibilidade para deficientes visuais.
-O usuário está usando a câmera do celular ou computador em tempo real.
-Você recebe a lista de objetos detectados por visão computacional (YOLO) no frame atual.
+O usuário está usando a câmera em tempo real. Você recebe:
+1) Objetos detectados por visão computacional (YOLO)
+2) Rostos detectados por reconhecimento facial (nome se conhecido, ou "desconhecido")
 
 REGRAS:
 - Responda SEMPRE em português brasileiro, de forma clara e concisa (máximo 3 frases).
-- Baseie-se APENAS nos objetos detectados para perguntas sobre o que a câmera está vendo.
-- Não invente objetos, posições ou quantidades que não estejam na lista.
-- Se não houver detecções relevantes, diga honestamente que não está vendo o objeto perguntado.
+- Baseie-se APENAS nos dados fornecidos sobre objetos E rostos.
+- Se houver rosto(s) na lista, confirme quando o usuário perguntar sobre pessoas ou rostos.
+- Não invente objetos, rostos, posições ou quantidades.
 - Seja natural, amigável e direto — o usuário ouvirá sua resposta em voz alta.
+- Para cadastrar um rosto, diga ao usuário: "Diga cadastrar essa pessoa" e siga as instruções.
 - NUNCA peça ao usuário para descrever a cena ou tirar outra foto."""
 
 _elevenlabs_client = None
@@ -511,15 +513,100 @@ def _get_elevenlabs_client():
         return _elevenlabs_client
 
 
-def _formatar_deteccoes_voz(deteccoes: List[Dict]) -> str:
-    if not deteccoes:
-        return 'Nenhum objeto detectado no momento.'
-    linhas = []
-    for d in deteccoes:
-        nome = d.get('nome', '?')
-        conf = float(d.get('confianca', 0))
-        linhas.append(f'- {nome} (confiança: {conf:.0%})')
-    return '\n'.join(linhas)
+def _formatar_contexto_voz(deteccoes: List[Dict], rostos: List[Dict]) -> str:
+    partes = []
+
+    if deteccoes:
+        linhas = []
+        for d in deteccoes:
+            nome = d.get('nome', '?')
+            conf = float(d.get('confianca', 0))
+            linhas.append(f'- {nome} (confiança: {conf:.0%})')
+        partes.append('Objetos detectados:\n' + '\n'.join(linhas))
+    else:
+        partes.append('Objetos detectados: nenhum no momento.')
+
+    if rostos:
+        linhas = []
+        for r in rostos:
+            if r.get('conhecido'):
+                linhas.append(
+                    f"- {r.get('nome', '?')} (rosto conhecido, confiança: {float(r.get('confianca', 0)):.0%})"
+                )
+            else:
+                linhas.append(
+                    f"- rosto desconhecido (confiança: {float(r.get('confianca', 0)):.0%})"
+                )
+        partes.append('Rostos detectados:\n' + '\n'.join(linhas))
+    else:
+        partes.append('Rostos detectados: nenhum no momento.')
+
+    return '\n\n'.join(partes)
+
+
+def _responder_pergunta_rostos(pergunta: str, rostos: List[Dict]) -> Optional[str]:
+    """Respostas diretas sobre rostos — evita que a IA ignore dados faciais."""
+    t = pergunta.lower()
+    if any(p in t for p in ('cadastr', 'registr', 'salv', 'memoriz', 'gravar')):
+        return None
+
+    temas_rosto = (
+        'rosto', 'face', 'pessoa', 'alguém', 'alguem', 'quem',
+        'reconhece', 'conhece', 'identifica', 'vê', 've ',
+    )
+    if not any(p in t for p in temas_rosto):
+        return None
+
+    if not rostos:
+        return 'Não estou detectando nenhum rosto na câmera neste momento.'
+
+    conhecidos = [r for r in rostos if r.get('conhecido')]
+    desconhecidos = [r for r in rostos if not r.get('conhecido')]
+
+    if conhecidos and not desconhecidos:
+        if len(conhecidos) == 1:
+            nome = conhecidos[0].get('nome', 'alguém')
+            return f'Sim, estou vendo {nome}.'
+        nomes = ', '.join(r.get('nome', '?') for r in conhecidos)
+        return f'Sim, estou vendo {len(conhecidos)} pessoas conhecidas: {nomes}.'
+
+    if desconhecidos and not conhecidos:
+        qtd = len(desconhecidos)
+        if qtd == 1:
+            return 'Sim, estou vendo um rosto, mas ainda não o reconheço. Diga "cadastrar essa pessoa" para salvá-lo.'
+        return f'Sim, estou vendo {qtd} rostos que ainda não reconheço. Diga "cadastrar essa pessoa" para salvar.'
+
+    nomes = ', '.join(r.get('nome', '?') for r in conhecidos)
+    return (
+        f'Estou vendo {len(conhecidos)} pessoa(s) conhecida(s): {nomes}, '
+        f'e {len(desconhecidos)} rosto(s) desconhecido(s).'
+    )
+
+
+def gerar_resposta_voz(pergunta: str, deteccoes: List[Dict], rostos: List[Dict]) -> str:
+    resposta_direta = _responder_pergunta_rostos(pergunta, rostos)
+    if resposta_direta:
+        return resposta_direta
+
+    if not glm_disponivel():
+        return 'Serviço de IA indisponível no momento.'
+
+    contexto = _formatar_contexto_voz(deteccoes, rostos)
+    user_content = f"""Cena atual da câmera:
+{contexto}
+
+Pergunta do usuário: "{pergunta}"
+
+Responda de forma útil e acessível:"""
+
+    return glm_chat(
+        messages=[
+            {'role': 'system', 'content': SYSTEM_PROMPT_VOZ},
+            {'role': 'user', 'content': user_content},
+        ],
+        max_tokens=200,
+        temperature=0.7,
+    )
 
 
 def transcrever_audio(audio_bytes: bytes) -> str:
@@ -548,28 +635,6 @@ def transcrever_audio(audio_bytes: bytes) -> str:
             os.unlink(tmp_path)
 
 
-def gerar_resposta_voz(pergunta: str, deteccoes: List[Dict]) -> str:
-    if not glm_disponivel():
-        return 'Serviço de IA indisponível no momento.'
-
-    contexto = _formatar_deteccoes_voz(deteccoes)
-    user_content = f"""Objetos detectados pela câmera agora:
-{contexto}
-
-Pergunta do usuário: "{pergunta}"
-
-Responda de forma útil e acessível:"""
-
-    return glm_chat(
-        messages=[
-            {'role': 'system', 'content': SYSTEM_PROMPT_VOZ},
-            {'role': 'user', 'content': user_content},
-        ],
-        max_tokens=200,
-        temperature=0.7,
-    )
-
-
 def sintetizar_voz(texto: str) -> bytes:
     client = _get_elevenlabs_client()
     if not client:
@@ -587,8 +652,10 @@ def sintetizar_voz(texto: str) -> bytes:
 def processar_pergunta_voz(
     audio_b64: str,
     deteccoes_atuais: list,
+    rostos_atuais: list,
     frame_b64: Optional[str] = None,
     cadastro_sessao: Optional[CadastroSessao] = None,
+    cadastro_lock: Optional[threading.Lock] = None,
 ) -> dict:
     audio_bytes = base64.b64decode(audio_b64)
 
@@ -631,15 +698,17 @@ def processar_pergunta_voz(
                 frame = occhio._decodificar_imagem(frame_b64)
             except Exception:
                 pass
-        resposta_cadastro = occhio.face_registry.processar_mensagem(
-            cadastro_sessao, transcricao, frame=frame
-        )
-        if resposta_cadastro:
-            resposta = resposta_cadastro
-            cadastro_ativo = cadastro_sessao.em_andamento()
+        lock = cadastro_lock or threading.Lock()
+        with lock:
+            resposta_cadastro = occhio.face_registry.processar_mensagem(
+                cadastro_sessao, transcricao, frame=frame
+            )
+            if resposta_cadastro:
+                resposta = resposta_cadastro
+                cadastro_ativo = cadastro_sessao.em_andamento()
 
     if resposta is None:
-        resposta = gerar_resposta_voz(transcricao, deteccoes_atuais)
+        resposta = gerar_resposta_voz(transcricao, deteccoes_atuais, rostos_atuais)
 
     audio_b64_out = None
     audio_erro = None
@@ -657,6 +726,60 @@ def processar_pergunta_voz(
         'audio_erro': audio_erro,
         'cadastro_ativo': cadastro_ativo,
     }
+
+
+class _StreamState:
+    """Estado compartilhado da sessão WebSocket (frames + detecções)."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.deteccoes_atuais: List[Dict] = []
+        self.rostos_atuais: List[Dict] = []
+        self.ultimo_frame_b64: Optional[str] = None
+
+    def atualizar(self, frame_b64: str, deteccoes: list, rostos: list) -> None:
+        with self.lock:
+            self.ultimo_frame_b64 = frame_b64
+            self.deteccoes_atuais = list(deteccoes)
+            self.rostos_atuais = list(rostos)
+
+    def snapshot_voz(self):
+        with self.lock:
+            return (
+                list(self.deteccoes_atuais),
+                list(self.rostos_atuais),
+                self.ultimo_frame_b64,
+            )
+
+
+def _executar_voz_background(
+    ws,
+    audio_b64: str,
+    stream_state: _StreamState,
+    cadastro_sessao: CadastroSessao,
+    cadastro_lock: threading.Lock,
+) -> None:
+    try:
+        deteccoes, rostos, frame_b64 = stream_state.snapshot_voz()
+        resultado = processar_pergunta_voz(
+            audio_b64,
+            deteccoes,
+            rostos,
+            frame_b64=frame_b64,
+            cadastro_sessao=cadastro_sessao,
+            cadastro_lock=cadastro_lock,
+        )
+        ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
+    except Exception as e:
+        logger.exception('Erro ao processar voz em background')
+        ws.send(json.dumps({
+            'tipo': 'resposta_voz',
+            'erro': str(e),
+            'transcricao': '',
+            'resposta': 'Ocorreu um erro ao processar sua pergunta.',
+            'audio_b64': None,
+            'cadastro_ativo': cadastro_sessao.em_andamento(),
+        }))
 
 
 # Singleton
@@ -703,9 +826,9 @@ def stream_ws(ws):
     """WebSocket: frames de vídeo → bounding boxes; áudio → resposta falada."""
     logger.info('Cliente conectado via WebSocket')
     frame_count = 0
-    deteccoes_atuais = []
-    ultimo_frame_b64 = None
+    stream_state = _StreamState()
     cadastro_sessao = CadastroSessao()
+    cadastro_lock = threading.Lock()
     try:
         while True:
             mensagem = ws.receive()
@@ -725,24 +848,11 @@ def stream_ws(ws):
                         'erro': "Campo 'audio' não encontrado",
                     }))
                     continue
-                try:
-                    resultado = processar_pergunta_voz(
-                        audio_b64,
-                        deteccoes_atuais,
-                        frame_b64=ultimo_frame_b64,
-                        cadastro_sessao=cadastro_sessao,
-                    )
-                    ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
-                except Exception as e:
-                    logger.error(f'Erro ao processar pergunta de voz: {e}')
-                    ws.send(json.dumps({
-                        'tipo': 'resposta_voz',
-                        'erro': str(e),
-                        'transcricao': '',
-                        'resposta': 'Ocorreu um erro ao processar sua pergunta.',
-                        'audio_b64': None,
-                        'cadastro_ativo': cadastro_sessao.em_andamento(),
-                    }))
+                threading.Thread(
+                    target=_executar_voz_background,
+                    args=(ws, audio_b64, stream_state, cadastro_sessao, cadastro_lock),
+                    daemon=True,
+                ).start()
                 continue
 
             frame_b64 = dados.get('frame')
@@ -750,12 +860,15 @@ def stream_ws(ws):
                 ws.send(json.dumps({'erro': "Campo 'frame' não encontrado"}))
                 continue
 
-            ultimo_frame_b64 = frame_b64
             threshold = float(dados.get('threshold', 0.45))
             try:
                 occhio = get_occhio_instance()
                 resultado = occhio.processar_stream(frame_b64, confidence_threshold=threshold)
-                deteccoes_atuais = resultado.get('deteccoes', [])
+                stream_state.atualizar(
+                    frame_b64,
+                    resultado.get('deteccoes', []),
+                    resultado.get('rostos', []),
+                )
 
                 for alerta in resultado.get('alertas', []):
                     msg = alerta.get('mensagem', '')

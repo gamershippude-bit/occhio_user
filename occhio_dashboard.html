@@ -565,6 +565,7 @@ let audioStream = null;
 let gravando = false;
 let processandoVoz = false;
 let aguardandoFrame = false;
+let frameTimeout = null;
 let gravacaoInicio = 0;
 let detAlvo = [];
 let rostAlvo = [];
@@ -647,7 +648,7 @@ function conectarWS() {
           log(msg, 'info');
         }
         if (data.cadastro_ativo) {
-          log('Cadastro de pessoa em andamento…', 'info');
+          log('Cadastro em andamento — responda às perguntas por voz', 'info');
         }
         return;
       }
@@ -668,6 +669,7 @@ function conectarWS() {
       detAlvo = lastDeteccoes;
       rostAlvo = lastRostos;
       aguardandoFrame = false;
+      if (frameTimeout) { clearTimeout(frameTimeout); frameTimeout = null; }
       msVal.textContent = data.ms ?? '—';
       resVal.textContent = data.resolucao ?? '—';
       totalCount.textContent = lastDeteccoes.length;
@@ -824,6 +826,11 @@ function iniciarEnvioFrames() {
 
     const b64 = offscreen.toDataURL('image/jpeg', 0.7).split(',')[1];
     aguardandoFrame = true;
+    if (frameTimeout) clearTimeout(frameTimeout);
+    frameTimeout = setTimeout(() => {
+      aguardandoFrame = false;
+      frameTimeout = null;
+    }, 2500);
     ws.send(JSON.stringify({ frame: b64, threshold }));
   }, intervalo);
 }

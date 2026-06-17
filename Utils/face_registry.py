@@ -40,15 +40,24 @@ class CadastroSessao:
 
 def detectar_intencao_cadastro(texto: str) -> bool:
     t = texto.lower()
+    frases_diretas = (
+        'cadastrar rosto', 'cadastrar essa pessoa', 'cadastrar esse rosto',
+        'cadastra essa pessoa', 'cadastra esse rosto', 'cadastra o rosto',
+        'salvar rosto', 'salvar essa pessoa', 'salvar esse rosto',
+        'registrar rosto', 'registrar essa pessoa', 'registrar esse rosto',
+        'identificar rosto', 'identificar essa pessoa', 'identificar esse rosto',
+        'memorizar rosto', 'memorizar essa pessoa', 'memorizar esse rosto',
+        'quero cadastrar', 'quero salvar', 'quero registrar',
+        'adicionar rosto', 'adicionar essa pessoa', 'gravar rosto',
+        'conhecer essa pessoa', 'lembrar essa pessoa', 'anotar essa pessoa',
+    )
+    if any(frase in t for frase in frases_diretas):
+        return True
     if any(p in t for p in PALAVRAS_CADASTRO) and any(
         x in t for x in ('pessoa', 'rosto', 'face', 'ele', 'ela', 'essa', 'esse', 'frente', 'câmera', 'camera')
     ):
         return True
-    return any(frase in t for frase in (
-        'quero cadastrar', 'cadastrar essa pessoa', 'cadastrar essa pessoa',
-        'registrar essa pessoa', 'adicionar essa pessoa', 'salvar essa pessoa',
-        'cadastrar o rosto', 'registrar o rosto',
-    ))
+    return False
 
 
 def detectar_sim(texto: str) -> Optional[bool]:
@@ -92,11 +101,26 @@ class FaceRegistry:
             logger.error(f'Erro ao recarregar rostos: {e}')
             return 0
 
+    def contar_rostos_no_frame(self, frame) -> int:
+        if not self.face_detector or not hasattr(self.face_detector, 'contar_rostos'):
+            return 0
+        return self.face_detector.contar_rostos(frame)
+
     def capturar_encoding(self, frame) -> Tuple[Optional[np.ndarray], Optional[str]]:
         if not self.face_detector:
             return None, 'Detector facial não disponível.'
         if not hasattr(self.face_detector, 'extrair_encoding_principal'):
             return None, 'Detector facial incompleto.'
+
+        qtd = self.contar_rostos_no_frame(frame)
+        if qtd == 0:
+            return None, 'Não encontrei nenhum rosto na câmera. Posicione a pessoa de frente e tente de novo.'
+        if qtd > 1:
+            return None, (
+                f'Estou vendo {qtd} rostos na câmera. '
+                'Enquadre apenas uma pessoa para cadastrar e tente de novo.'
+            )
+
         encoding, msg = self.face_detector.extrair_encoding_principal(frame)
         if encoding is None:
             return None, msg or 'Não encontrei um rosto claro na câmera. Posicione a pessoa de frente e tente de novo.'
