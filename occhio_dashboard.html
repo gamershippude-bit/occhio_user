@@ -796,6 +796,7 @@ let audioChunks = [];
 let audioStream = null;
 let gravando = false;
 let processandoVoz = false;
+let ultimaRespostaVozTs = 0;
 let aguardandoFrame = false;
 let frameTimeout = null;
 let gravacaoInicio = 0;
@@ -884,6 +885,7 @@ function conectarWS() {
 
       if (data.tipo === 'resposta_voz') {
         processandoVoz = false;
+        ultimaRespostaVozTs = Date.now();
         setVozProcessando(false);
         if (data.erro) log(data.erro, 'err');
 
@@ -912,11 +914,10 @@ function conectarWS() {
 
       if (data.tipo === 'alerta_pessoa') {
         log(data.mensagem || `Reconheci ${data.nome}`, 'ok');
-        if (data.mensagem) {
-          respostaText.textContent = data.mensagem;
-          respostaText.classList.remove('empty');
+        const vozRecente = Date.now() - ultimaRespostaVozTs < 12000;
+        if (data.audio_b64 && !processandoVoz && !gravando && !vozRecente) {
+          tocarAudio(data.audio_b64);
         }
-        if (data.audio_b64) tocarAudio(data.audio_b64);
         return;
       }
 

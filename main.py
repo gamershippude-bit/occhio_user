@@ -484,16 +484,17 @@ class OcchioCloud:
 # ========== VOZ (Whisper + GLM-5 + ElevenLabs) ==========
 
 SYSTEM_PROMPT_VOZ = """Você é o Specula, assistente de acessibilidade para deficientes visuais.
-O usuário usa a câmera em tempo real. Você recebe objetos detectados (YOLO) e rostos reconhecidos (nome e parentesco quando cadastrado).
+O usuário usa a câmera em tempo real. Você recebe objetos detectados e rostos reconhecidos pelo nome.
 
 REGRAS DE NARRAÇÃO (sua resposta será LIDA EM VOZ ALTA):
 - Responda em português brasileiro, com no máximo 2 frases curtas.
-- Seja direto: vá ao ponto, sem rodeios.
-- NUNCA mencione porcentagens, confiança ou probabilidades.
-- NUNCA use "ele(a)", "dele(a)" ou formas com barra — use o nome da pessoa ou "a pessoa".
-- Baseie-se APENAS nos dados fornecidos. Não invente objetos, rostos ou quantidades.
-- Se houver rosto cadastrado, use nome e parentesco quando relevante.
-- Para cadastrar rosto novo: diga "Diga cadastrar essa pessoa"."""
+- Responda EXATAMENTE o que foi perguntado — se pedirem "além de X" ou "o que mais", fale do RESTO, não repita X.
+- Seja direto. Priorize objetos e contexto quando a pergunta for sobre a cena.
+- NUNCA mencione parentesco, relação ou "seu amigo/irmão" — a menos que o usuário pergunte explicitamente (ex: "tem algum amigo aqui?").
+- NUNCA mencione porcentagens ou confiança.
+- NUNCA use "ele(a)" ou formas com barra — use o nome ou "a pessoa".
+- Baseie-se APENAS nos dados fornecidos. Não invente.
+- Para cadastrar rosto: diga "Diga cadastrar essa pessoa"."""
 
 _elevenlabs_client = None
 _elevenlabs_lock = threading.Lock()
@@ -526,11 +527,8 @@ def _formatar_contexto_voz(
     partes = []
 
     if catalogo:
-        linhas = [
-            f"- {m['nome']}, parentesco: {m.get('relacao', 'conhecido')}"
-            for m in catalogo.values()
-        ]
-        partes.append('Rostos cadastrados (MySQL):\n' + '\n'.join(linhas))
+        nomes = ', '.join(m['nome'] for m in catalogo.values())
+        partes.append(f'Rostos cadastrados (referência): {nomes}')
 
     if deteccoes:
         contagem: Dict[str, int] = {}
@@ -548,14 +546,10 @@ def _formatar_contexto_voz(
         linhas = []
         for r in rostos:
             if r.get('conhecido'):
-                rel = r.get('relacao')
-                if rel:
-                    linhas.append(f"- {r.get('nome', '?')}, parentesco: {rel}")
-                else:
-                    linhas.append(f"- {r.get('nome', '?')} (cadastrado)")
+                linhas.append(f"- {r.get('nome', '?')}")
             else:
                 linhas.append('- rosto desconhecido')
-        partes.append('Rostos:\n' + '\n'.join(linhas))
+        partes.append('Rostos na câmera:\n' + '\n'.join(linhas))
     else:
         partes.append('Rostos: nenhum.')
 
@@ -585,50 +579,106 @@ def _rostos_unicos(rostos: List[Dict]) -> tuple:
     return list(conhecidos_map.values()), desconhecidos
 
 
-def _responder_pergunta_rostos(pergunta: str, rostos: List[Dict]) -> Optional[str]:
-    """Respostas diretas sobre rostos — evita que a IA ignore dados faciais."""
+def _pergunta_exclui_rosto_direto(pergunta: str) -> bool:
+    """Perguntas sobre cena/objetos — devem ir para a IA, não resposta fixa de rosto."""
+    t = pergunta.lower()
+    return any(p in t for p in (
+        'além', 'alem', 'além do', 'alem do', 'além de', 'alem de',
+        'o que', 'oque', 'quais', 'quantos', 'quanto',
+        'mais vê', 'mais ve', 'mais você', 'mais voce',
+        'objeto', 'cena', 'ambiente', 'descrev', 'fala sobre',
+        'me diga', 'exceto', 'fora ', 'resto', 'outra coisa', 'outro coisa',
+        'tem algo', 'tem alguma coisa', 'o que tem', 'o que há', 'o que ha',
+    ))
+
+
+def _pergunta_sobre_parentesco(pergunta: str) -> Optional[str]:
+    """Retorna termo de relação buscado (ex: 'amig') ou None."""
+    t = pergunta.lower()
+    filtros = (
+        ('amig', ('amigo', 'amiga', 'amigos', 'amigas')),
+        ('irm', ('irmão', 'irmao', 'irmã', 'irma', 'irmãos', 'irmaos')),
+        ('famí', ('família', 'familia', 'parente', 'parentes', 'parentesco')),
+        ('coleg', ('colega', 'colegas')),
+        ('conhecid', ('conhecido', 'conhecida', 'conhecidos')),
+    )
+    for stem, palavras in filtros:
+        if any(p in t for p in palavras):
+            return stem
+    return None
+
+
+def _rostos_por_parentesco(conhecidos: List[Dict], catalogo: Optional[Dict[str, dict]], stem: str) -> List[Dict]:
+    resultado = []
+    for r in conhecidos:
+        nome = r.get('nome', '')
+        rel = (r.get('relacao') or '').lower()
+        if not rel and catalogo:
+            meta = catalogo.get(nome.lower(), {})
+            rel = (meta.get('relacao') or '').lower()
+        if stem in rel:
+            resultado.append(r)
+    return resultado
+
+
+def _pergunta_identifica_rosto(pergunta: str) -> bool:
+    """Só responde rosto diretamente em perguntas explícitas de identificação."""
+    if _pergunta_exclui_rosto_direto(pergunta):
+        return False
+    t = pergunta.lower()
+    if _pergunta_sobre_parentesco(pergunta):
+        return True
+    return any(p in t for p in (
+        'quem é', 'quem e', 'quem ta', 'quem está', 'quem esta',
+        'reconhece', 'conhece algu', 'identifica',
+        'tem alguém', 'tem alguem', 'algum rosto', 'alguma pessoa',
+        'quem você vê', 'quem voce ve', 'quem vc vê', 'quem vc ve',
+        'está vendo algu', 'esta vendo algu', 'estou vendo algu',
+        'quem aparece', 'quem tem aí', 'quem tem ai',
+    ))
+
+
+def _responder_pergunta_rostos(
+    pergunta: str,
+    rostos: List[Dict],
+    catalogo: Optional[Dict[str, dict]] = None,
+) -> Optional[str]:
+    """Respostas diretas só para identificação explícita ou filtro por parentesco."""
     t = pergunta.lower()
     if any(p in t for p in ('cadastr', 'registr', 'salv', 'memoriz', 'gravar')):
         return None
 
-    temas_rosto = (
-        'rosto', 'face', 'pessoa', 'alguém', 'alguem', 'quem',
-        'reconhece', 'conhece', 'identifica', 'vê', 've ',
-    )
-    if not any(p in t for p in temas_rosto):
+    filtro_rel = _pergunta_sobre_parentesco(pergunta)
+    if not filtro_rel and not _pergunta_identifica_rosto(pergunta):
         return None
 
     if not rostos:
-        return 'Nenhum rosto na câmera agora.'
+        if filtro_rel:
+            return 'Não vejo ninguém com esse perfil agora.'
+        return None
 
     conhecidos, qtd_desconhecidos = _rostos_unicos(rostos)
 
+    if filtro_rel:
+        matches = _rostos_por_parentesco(conhecidos, catalogo, filtro_rel)
+        if matches:
+            nomes = ', '.join(r.get('nome', '?') for r in matches)
+            return f'Sim, {nomes}.'
+        return 'Não vejo ninguém com esse perfil agora.'
+
     if conhecidos and qtd_desconhecidos == 0:
         if len(conhecidos) == 1:
-            r = conhecidos[0]
-            nome = r.get('nome', 'alguém')
-            rel = r.get('relacao')
-            if rel:
-                return f'Sim, {nome}, seu {rel}, está na câmera.'
-            return f'Sim, {nome} está na câmera.'
-        partes = []
-        for r in conhecidos:
-            nome = r.get('nome', '?')
-            rel = r.get('relacao')
-            partes.append(f'{nome}, seu {rel}' if rel else nome)
-        return f'Sim, {len(conhecidos)} pessoas: {"; ".join(partes)}.'
+            return f'Sim, {conhecidos[0].get("nome", "alguém")} está na câmera.'
+        nomes = ', '.join(r.get('nome', '?') for r in conhecidos)
+        return f'Sim, {len(conhecidos)} pessoas: {nomes}.'
 
     if qtd_desconhecidos > 0 and not conhecidos:
         if qtd_desconhecidos == 1:
             return 'Um rosto desconhecido. Diga "cadastrar essa pessoa" para salvar.'
-        return f'{qtd_desconhecidos} rostos desconhecidos. Diga "cadastrar essa pessoa" para salvar.'
+        return f'{qtd_desconhecidos} rostos desconhecidos.'
 
-    nomes = []
-    for r in conhecidos:
-        nome = r.get('nome', '?')
-        rel = r.get('relacao')
-        nomes.append(f'{nome}, seu {rel}' if rel else nome)
-    return f'{", ".join(nomes)} e {qtd_desconhecidos} rosto(s) desconhecido(s).'
+    nomes = ', '.join(r.get('nome', '?') for r in conhecidos)
+    return f'{nomes} e {qtd_desconhecidos} rosto(s) desconhecido(s).'
 
 
 def gerar_resposta_voz(
@@ -637,7 +687,7 @@ def gerar_resposta_voz(
     rostos: List[Dict],
     catalogo: Optional[Dict[str, dict]] = None,
 ) -> str:
-    resposta_direta = _responder_pergunta_rostos(pergunta, rostos)
+    resposta_direta = _responder_pergunta_rostos(pergunta, rostos, catalogo)
     if resposta_direta:
         return _limpar_resposta_fala(resposta_direta)
 
@@ -650,7 +700,7 @@ def gerar_resposta_voz(
 
 Pergunta do usuário: "{pergunta}"
 
-Responda de forma útil e acessível:"""
+Responda só o que foi perguntado. Se pedir "além de" alguém ou "o que mais", ignore essa pessoa e descreva o resto:"""
 
     return _limpar_resposta_fala(glm_chat(
         messages=[
@@ -794,12 +844,21 @@ class _StreamState:
         self.deteccoes_atuais: List[Dict] = []
         self.rostos_atuais: List[Dict] = []
         self.ultimo_frame_b64: Optional[str] = None
+        self.voz_ocupada: bool = False
 
     def atualizar(self, frame_b64: str, deteccoes: list, rostos: list) -> None:
         with self.lock:
             self.ultimo_frame_b64 = frame_b64
             self.deteccoes_atuais = list(deteccoes)
             self.rostos_atuais = list(rostos)
+
+    def set_voz_ocupada(self, ocupada: bool) -> None:
+        with self.lock:
+            self.voz_ocupada = ocupada
+
+    def voz_esta_ocupada(self) -> bool:
+        with self.lock:
+            return self.voz_ocupada
 
     def snapshot_voz(self):
         with self.lock:
@@ -838,6 +897,8 @@ def _executar_voz_background(
             'audio_b64': None,
             'cadastro_ativo': cadastro_sessao.em_andamento(),
         }))
+    finally:
+        stream_state.set_voz_ocupada(False)
 
 
 # Singleton
@@ -906,6 +967,7 @@ def stream_ws(ws):
                         'erro': "Campo 'audio' não encontrado",
                     }))
                     continue
+                stream_state.set_voz_ocupada(True)
                 threading.Thread(
                     target=_executar_voz_background,
                     args=(ws, audio_b64, stream_state, cadastro_sessao, cadastro_lock),
@@ -929,6 +991,8 @@ def stream_ws(ws):
                 )
 
                 for alerta in resultado.get('alertas', []):
+                    if stream_state.voz_esta_ocupada():
+                        continue
                     msg = alerta.get('mensagem', '')
                     audio_alert = None
                     try:
@@ -938,7 +1002,6 @@ def stream_ws(ws):
                     ws.send(json.dumps({
                         'tipo': 'alerta_pessoa',
                         'nome': alerta.get('nome'),
-                        'relacao': alerta.get('relacao'),
                         'mensagem': msg,
                         'audio_b64': audio_alert,
                     }))

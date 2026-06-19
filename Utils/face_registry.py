@@ -296,11 +296,9 @@ class FaceRegistry:
                 continue
             self._alertas_recentes[nome] = agora
             meta = self._meta_rosto(nome) or {}
-            relacao = meta.get('relacao') or 'conhecido'
             alertas.append({
                 'nome': nome,
-                'relacao': relacao,
-                'mensagem': f'{nome} está aqui, seu {relacao}.',
+                'mensagem': f'{nome} está aqui.',
             })
         return alertas
 
