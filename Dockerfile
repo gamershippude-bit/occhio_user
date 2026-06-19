@@ -34,4 +34,4 @@ ENV MKL_NUM_THREADS=1
 # Railway injeta PORT automaticamente
 EXPOSE 8080
 
-CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 300 --keep-alive 65 main:app
+CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 120 --graceful-timeout 30 --keep-alive 65 main:app

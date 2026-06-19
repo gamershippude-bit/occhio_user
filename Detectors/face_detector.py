@@ -23,27 +23,26 @@ class FaceDetector:
 
     def carregar_encodings(self, encodings, names):
         """Carrega encodings conhecidos — um encoding por nome (evita duplicatas do banco)."""
-        with _DLIB_LOCK:
-            self.known_face_encodings = []
-            self.known_face_names = []
-            vistos = set()
+        self.known_face_encodings = []
+        self.known_face_names = []
+        vistos = set()
 
-            for encoding, name in zip(encodings, names):
-                if (encoding is None or len(encoding) != 128):
-                    continue
-                nome = name.strip()
-                if nome.lower() in ('desconhecido', 'unknown', ''):
-                    continue
-                chave = nome.lower()
-                if chave in vistos:
-                    continue
-                vistos.add(chave)
-                self.known_face_encodings.append(encoding)
-                self.known_face_names.append(nome)
+        for encoding, name in zip(encodings, names):
+            if (encoding is None or len(encoding) != 128):
+                continue
+            nome = name.strip()
+            if nome.lower() in ('desconhecido', 'unknown', ''):
+                continue
+            chave = nome.lower()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            self.known_face_encodings.append(encoding)
+            self.known_face_names.append(nome)
 
-            logger.info(f"Carregados {len(self.known_face_encodings)} rosto(s) único(s).")
-            if self.known_face_names:
-                logger.info(f"Nomes cadastrados: {self.known_face_names}")
+        logger.info(f"Carregados {len(self.known_face_encodings)} rosto(s) único(s).")
+        if self.known_face_names:
+            logger.info(f"Nomes cadastrados: {self.known_face_names}")
 
     def detectar_faces(self, frame):
         """

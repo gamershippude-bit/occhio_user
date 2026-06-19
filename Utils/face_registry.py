@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from Detectors.face_detector import _DLIB_LOCK
+
 logger = logging.getLogger(__name__)
 
 PALAVRAS_CADASTRO = (
@@ -177,11 +179,15 @@ class FaceRegistry:
             time.sleep(0.05)
 
         occhio._encoding_request.clear()
+        logger.warning('⚠️ Timeout ao capturar encoding — tente novamente')
         return None, 'Timeout ao capturar rosto da câmera. Tente novamente.'
+
+    def capturar_encoding_async(self, occhio, timeout: float = 5.0) -> Tuple[Optional[np.ndarray], Optional[str]]:
+        return self.capturar_encoding_do_frame_atual(occhio, timeout)
 
     def capturar_encoding(self, frame=None, occhio=None) -> Tuple[Optional[np.ndarray], Optional[str]]:
         if occhio is not None:
-            return self.capturar_encoding_do_frame_atual(occhio)
+            return self.capturar_encoding_async(occhio)
 
         if not self.face_detector:
             return None, 'Detector facial não disponível.'
@@ -222,20 +228,23 @@ class FaceRegistry:
         if sessao.estado == 'idle':
             if not detectar_intencao_cadastro(texto):
                 return None
-            encoding, erro = self.capturar_encoding(frame=frame, occhio=occhio)
+            if occhio is None:
+                return 'Preciso da câmera ativa para cadastrar. Mantenha o stream conectado.'
+            encoding, erro = self.capturar_encoding_async(occhio)
             if erro:
                 return erro
-            if self.face_store and self.face_store.face_exists(encoding):
-                existente = None
-                if hasattr(self.face_store, 'find_existing_name'):
-                    existente = self.face_store.find_existing_name(encoding)
-                if existente:
-                    meta = self._meta_rosto(existente)
-                    rel = meta.get('relacao') if meta else None
-                    if rel:
-                        return f'{existente} já está cadastrado como {rel}.'
-                    return f'{existente} já está cadastrado.'
-                return 'Essa pessoa já parece estar cadastrada.'
+            with _DLIB_LOCK:
+                if self.face_store and self.face_store.face_exists(encoding):
+                    existente = None
+                    if hasattr(self.face_store, 'find_existing_name'):
+                        existente = self.face_store.find_existing_name(encoding)
+                    if existente:
+                        meta = self._meta_rosto(existente)
+                        rel = meta.get('relacao') if meta else None
+                        if rel:
+                            return f'{existente} já está cadastrado como {rel}.'
+                        return f'{existente} já está cadastrado.'
+                    return 'Essa pessoa já parece estar cadastrada.'
             sessao.encoding = encoding
             sessao.estado = 'aguardando_nome'
             sessao.iniciado_em = time.time()
@@ -312,16 +321,19 @@ class FaceRegistry:
         self, sessao: CadastroSessao, frame=None, occhio=None
     ) -> Optional[str]:
         """Inicia cadastro após o usuário confirmar a sugestão."""
-        encoding, erro = self.capturar_encoding(frame=frame, occhio=occhio)
+        if occhio is None:
+            return 'Preciso da câmera ativa para aprender o rosto.'
+        encoding, erro = self.capturar_encoding_async(occhio)
         if erro:
             return erro
-        if self.face_store and self.face_store.face_exists(encoding):
-            existente = None
-            if hasattr(self.face_store, 'find_existing_name'):
-                existente = self.face_store.find_existing_name(encoding)
-            if existente:
-                return f'{existente} já está cadastrado.'
-            return 'Essa pessoa já parece estar cadastrada.'
+        with _DLIB_LOCK:
+            if self.face_store and self.face_store.face_exists(encoding):
+                existente = None
+                if hasattr(self.face_store, 'find_existing_name'):
+                    existente = self.face_store.find_existing_name(encoding)
+                if existente:
+                    return f'{existente} já está cadastrado.'
+                return 'Essa pessoa já parece estar cadastrada.'
         sessao.encoding = encoding
         sessao.estado = 'aguardando_nome'
         sessao.iniciado_em = time.time()

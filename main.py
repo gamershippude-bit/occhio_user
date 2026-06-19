@@ -20,6 +20,7 @@ import numpy as np
 import threading
 import base64
 import tempfile
+import signal
 from pathlib import Path
 from flask import Flask, jsonify, request
 from flask_sock import Sock
@@ -1127,7 +1128,8 @@ class OcchioCloud:
                 frame = cv2.resize(frame, (640, int(altura * escala)), interpolation=cv2.INTER_AREA)
                 altura, largura = frame.shape[:2]
 
-            if self._encoding_request.is_set() and self.detector_faces:
+            capturando_encoding = self._encoding_request.is_set()
+            if capturando_encoding and self.detector_faces:
                 encoding, erro = self.detector_faces.extrair_encoding_principal(frame)
                 with self._encoding_lock:
                     if encoding is not None:
@@ -1157,7 +1159,7 @@ class OcchioCloud:
                     })
             rostos = self._last_rostos
             alertas = []
-            if self.face_registry:
+            if self.face_registry and not capturando_encoding:
                 self._stream_face_counter += 1
                 if self._stream_face_counter % 2 == 0:
                     face_w = 320
@@ -1620,8 +1622,9 @@ def stream_ws(ws):
                 continue
 
             frame_count += 1
-            if frame_count % 30 == 0:
-                logger.info(f'{frame_count} frames processados | último: {resultado.get("ms")}ms')
+            ultimo_ms = resultado.get('ms', 0)
+            if ultimo_ms > 400:
+                logger.warning(f'⚠️ Latência alta: {ultimo_ms}ms no frame {frame_count}')
     except Exception as e:
         if 'Connection closed' in str(e) or 'connection closed' in str(e).lower():
             logger.info('WebSocket encerrado pelo cliente')
@@ -1784,7 +1787,13 @@ def _warmup_em_background():
 
 threading.Thread(target=_warmup_em_background, daemon=True).start()
 
+
+def _handler_segv(signum, frame):
+    logger.error('❌ SIGSEGV capturado — tentando recuperar')
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGSEGV, _handler_segv)
     porta = int(os.getenv('PORT', '8080'))
     logger.info(f"🚀 Iniciando Occhio Cloud v5.1 na porta {porta}")
     logger.info(f"   Dashboard: http://localhost:{porta}/")
