@@ -1336,9 +1336,9 @@ def processar_pergunta_voz(
                 stream_state.sugestao_cadastro_pendente = False
                 lock = cadastro_lock or threading.Lock()
                 with lock:
-                resposta = occhio.face_registry.iniciar_cadastro_confirmado(
-                    cadastro_sessao, frame=frame, occhio=occhio
-                )
+                    resposta = occhio.face_registry.iniciar_cadastro_confirmado(
+                        cadastro_sessao, frame=frame, occhio=occhio
+                    )
                     cadastro_ativo = cadastro_sessao.em_andamento() if cadastro_sessao else False
                 if resposta and memoria:
                     memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
