@@ -486,6 +486,28 @@
     .log-line.err { color: var(--warn); }
     .log-line.info { color: var(--accent); }
 
+    .btn-camera-switch {
+      display: none;
+      position: absolute;
+      top: calc(16px + env(safe-area-inset-top, 0px));
+      right: 16px;
+      z-index: 40;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: #00000099;
+      color: var(--text);
+      font-size: 1.2rem;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+      touch-action: manipulation;
+    }
+    .btn-camera-switch.visible { display: flex; }
+    .btn-camera-switch:active { opacity: 0.7; }
+
     @media (max-width: 768px) {
       header {
         padding: 8px 12px;
@@ -639,6 +661,7 @@
 
     <button class="voice-fab" id="btn-perguntar-fab" aria-label="Segure para perguntar por voz">🎙</button>
     <span class="voice-fab-label" id="voice-fab-label">Segure para falar</span>
+    <button class="btn-camera-switch" id="btn-switch-cam" aria-label="Alternar câmera" title="Câmera frontal">🤳</button>
   </div>
 
   <div class="mobile-recording-bar" id="mobile-recording-bar">
@@ -658,6 +681,7 @@
     <div class="controls">
       <button class="btn btn-primary" id="btn-start">▶ Iniciar câmera</button>
       <button class="btn btn-danger" id="btn-stop" disabled>■ Parar</button>
+      <button class="btn btn-secondary" id="btn-switch-cam-sidebar" style="display:none">🤳 Câmera frontal</button>
 
       <div>
         <div class="slider-row">
@@ -756,6 +780,7 @@ function interpolarCaixas(atual, alvo, fator) {
 
 let ws = null;
 let stream = null;
+let facingMode = 'environment';
 let rafId = null;
 let sendLoop = null;
 let lastDeteccoesRaw = [];
@@ -791,6 +816,8 @@ const msVal = document.getElementById('ms-val');
 const resVal = document.getElementById('res-val');
 const btnStart = document.getElementById('btn-start');
 const btnStop = document.getElementById('btn-stop');
+const btnSwitchCam = document.getElementById('btn-switch-cam');
+const btnSwitchCamSidebar = document.getElementById('btn-switch-cam-sidebar');
 const threshSlider = document.getElementById('thresh-slider');
 const threshLabel = document.getElementById('thresh-label');
 const logArea = document.getElementById('log-area');
@@ -924,7 +951,7 @@ function conectarWS() {
 async function iniciarCamera() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: { ideal: facingMode } },
       audio: false
     });
 
@@ -932,11 +959,13 @@ async function iniciarCamera() {
     await video.play();
 
     camPill.classList.add('live');
-    camLabel.textContent = 'Câmera ativa';
+    atualizarLabelCamera();
     placeholder.style.display = 'none';
     metrics.style.display = 'flex';
     btnStart.disabled = true;
     btnStop.disabled = false;
+    btnSwitchCam.classList.add('visible');
+    btnSwitchCamSidebar.style.display = 'block';
     setVozUI(true);
 
     log('Câmera iniciada', 'ok');
@@ -947,6 +976,27 @@ async function iniciarCamera() {
     log(`Câmera negada: ${e.message}`, 'err');
     alert(`Não foi possível acessar a câmera.\n${e.message}`);
   }
+}
+
+function atualizarLabelCamera() {
+  const frontal = facingMode === 'user';
+  const label = frontal ? 'Câmera frontal' : 'Câmera traseira';
+  camLabel.textContent = label;
+  btnSwitchCam.title = frontal ? 'Usar câmera traseira' : 'Usar câmera frontal';
+  btnSwitchCam.setAttribute('aria-label', btnSwitchCam.title);
+  btnSwitchCamSidebar.textContent = frontal ? '📷 Câmera traseira' : '🤳 Câmera frontal';
+}
+
+async function trocarCamera() {
+  if (!stream) return;
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  pararGravacao(true);
+  if (sendLoop) { clearInterval(sendLoop); sendLoop = null; }
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  log(`Alternando para câmera ${facingMode === 'user' ? 'frontal' : 'traseira'}…`, 'info');
+  await iniciarCamera();
 }
 
 function pararCamera() {
@@ -970,6 +1020,9 @@ function pararCamera() {
 
   camPill.classList.remove('live');
   camLabel.textContent = 'Câmera inativa';
+  btnSwitchCam.classList.remove('visible');
+  btnSwitchCamSidebar.style.display = 'none';
+  facingMode = 'environment';
   placeholder.style.display = 'flex';
   metrics.style.display = 'none';
   btnStart.disabled = false;
@@ -1024,7 +1077,7 @@ function iniciarRenderLoop() {
       ctx.lineWidth = 3;
       ctx.strokeRect(x, y, w, h);
       const label = face.conhecido
-        ? `${face.nome}  ${Math.round(face.confianca * 100)}%`
+        ? face.nome
         : 'Rosto desconhecido';
       desenharRotulo(ctx, label, x, y + h + 2, cor, false);
     }
@@ -1201,6 +1254,8 @@ function tocarAudio(b64) {
 
 btnStart.addEventListener('click', iniciarCamera);
 btnStop.addEventListener('click', pararCamera);
+btnSwitchCam.addEventListener('click', trocarCamera);
+btnSwitchCamSidebar.addEventListener('click', trocarCamera);
 
 function bindVoz(el) {
   el.addEventListener('mousedown', (e) => { e.preventDefault(); iniciarGravacao(); });

@@ -3,6 +3,13 @@ Occhio - Sistema de Visão Computacional para Deficientes Visuais
 Versão: 5.0.0 - API Padronizada (Português)
 """
 import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import cv2
 import logging
 import time
@@ -476,19 +483,17 @@ class OcchioCloud:
 
 # ========== VOZ (Whisper + GLM-5 + ElevenLabs) ==========
 
-SYSTEM_PROMPT_VOZ = """Você é o Occhio, um assistente de acessibilidade para deficientes visuais.
-O usuário está usando a câmera em tempo real. Você recebe:
-1) Objetos detectados por visão computacional (YOLO)
-2) Rostos detectados por reconhecimento facial (nome se conhecido, ou "desconhecido")
+SYSTEM_PROMPT_VOZ = """Você é o Specula, assistente de acessibilidade para deficientes visuais.
+O usuário usa a câmera em tempo real. Você recebe objetos detectados (YOLO) e rostos reconhecidos (nome e parentesco quando cadastrado).
 
-REGRAS:
-- Responda SEMPRE em português brasileiro, de forma clara e concisa (máximo 3 frases).
-- Baseie-se APENAS nos dados fornecidos sobre objetos E rostos.
-- Se houver rosto(s) na lista, confirme quando o usuário perguntar sobre pessoas ou rostos.
-- Não invente objetos, rostos, posições ou quantidades.
-- Seja natural, amigável e direto — o usuário ouvirá sua resposta em voz alta.
-- Para cadastrar um rosto, diga ao usuário: "Diga cadastrar essa pessoa" e siga as instruções.
-- NUNCA peça ao usuário para descrever a cena ou tirar outra foto."""
+REGRAS DE NARRAÇÃO (sua resposta será LIDA EM VOZ ALTA):
+- Responda em português brasileiro, com no máximo 2 frases curtas.
+- Seja direto: vá ao ponto, sem rodeios.
+- NUNCA mencione porcentagens, confiança ou probabilidades.
+- NUNCA use "ele(a)", "dele(a)" ou formas com barra — use o nome da pessoa ou "a pessoa".
+- Baseie-se APENAS nos dados fornecidos. Não invente objetos, rostos ou quantidades.
+- Se houver rosto cadastrado, use nome e parentesco quando relevante.
+- Para cadastrar rosto novo: diga "Diga cadastrar essa pessoa"."""
 
 _elevenlabs_client = None
 _elevenlabs_lock = threading.Lock()
@@ -513,35 +518,71 @@ def _get_elevenlabs_client():
         return _elevenlabs_client
 
 
-def _formatar_contexto_voz(deteccoes: List[Dict], rostos: List[Dict]) -> str:
+def _formatar_contexto_voz(
+    deteccoes: List[Dict],
+    rostos: List[Dict],
+    catalogo: Optional[Dict[str, dict]] = None,
+) -> str:
     partes = []
 
+    if catalogo:
+        linhas = [
+            f"- {m['nome']}, parentesco: {m.get('relacao', 'conhecido')}"
+            for m in catalogo.values()
+        ]
+        partes.append('Rostos cadastrados (MySQL):\n' + '\n'.join(linhas))
+
     if deteccoes:
-        linhas = []
+        contagem: Dict[str, int] = {}
         for d in deteccoes:
             nome = d.get('nome', '?')
-            conf = float(d.get('confianca', 0))
-            linhas.append(f'- {nome} (confiança: {conf:.0%})')
-        partes.append('Objetos detectados:\n' + '\n'.join(linhas))
+            contagem[nome] = contagem.get(nome, 0) + 1
+        linhas = []
+        for nome, qtd in contagem.items():
+            linhas.append(f'- {nome}' + (f' (×{qtd})' if qtd > 1 else ''))
+        partes.append('Objetos:\n' + '\n'.join(linhas))
     else:
-        partes.append('Objetos detectados: nenhum no momento.')
+        partes.append('Objetos: nenhum.')
 
     if rostos:
         linhas = []
         for r in rostos:
             if r.get('conhecido'):
-                linhas.append(
-                    f"- {r.get('nome', '?')} (rosto conhecido, confiança: {float(r.get('confianca', 0)):.0%})"
-                )
+                rel = r.get('relacao')
+                if rel:
+                    linhas.append(f"- {r.get('nome', '?')}, parentesco: {rel}")
+                else:
+                    linhas.append(f"- {r.get('nome', '?')} (cadastrado)")
             else:
-                linhas.append(
-                    f"- rosto desconhecido (confiança: {float(r.get('confianca', 0)):.0%})"
-                )
-        partes.append('Rostos detectados:\n' + '\n'.join(linhas))
+                linhas.append('- rosto desconhecido')
+        partes.append('Rostos:\n' + '\n'.join(linhas))
     else:
-        partes.append('Rostos detectados: nenhum no momento.')
+        partes.append('Rostos: nenhum.')
 
     return '\n\n'.join(partes)
+
+
+def _limpar_resposta_fala(texto: str) -> str:
+    """Remove porcentagens e formas inadequadas para narração em voz."""
+    import re
+    texto = re.sub(r'\d+\s*%', '', texto)
+    texto = re.sub(r'\(\s*\)', '', texto)
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    return texto
+
+
+def _rostos_unicos(rostos: List[Dict]) -> tuple:
+    """Agrupa rostos por identidade — evita contar a mesma pessoa várias vezes."""
+    conhecidos_map: Dict[str, Dict] = {}
+    desconhecidos = 0
+    for r in rostos:
+        if r.get('conhecido') and r.get('nome'):
+            chave = r['nome'].lower()
+            if chave not in conhecidos_map:
+                conhecidos_map[chave] = r
+        else:
+            desconhecidos += 1
+    return list(conhecidos_map.values()), desconhecidos
 
 
 def _responder_pergunta_rostos(pergunta: str, rostos: List[Dict]) -> Optional[str]:
@@ -558,40 +599,52 @@ def _responder_pergunta_rostos(pergunta: str, rostos: List[Dict]) -> Optional[st
         return None
 
     if not rostos:
-        return 'Não estou detectando nenhum rosto na câmera neste momento.'
+        return 'Nenhum rosto na câmera agora.'
 
-    conhecidos = [r for r in rostos if r.get('conhecido')]
-    desconhecidos = [r for r in rostos if not r.get('conhecido')]
+    conhecidos, qtd_desconhecidos = _rostos_unicos(rostos)
 
-    if conhecidos and not desconhecidos:
+    if conhecidos and qtd_desconhecidos == 0:
         if len(conhecidos) == 1:
-            nome = conhecidos[0].get('nome', 'alguém')
-            return f'Sim, estou vendo {nome}.'
-        nomes = ', '.join(r.get('nome', '?') for r in conhecidos)
-        return f'Sim, estou vendo {len(conhecidos)} pessoas conhecidas: {nomes}.'
+            r = conhecidos[0]
+            nome = r.get('nome', 'alguém')
+            rel = r.get('relacao')
+            if rel:
+                return f'Sim, {nome}, seu {rel}, está na câmera.'
+            return f'Sim, {nome} está na câmera.'
+        partes = []
+        for r in conhecidos:
+            nome = r.get('nome', '?')
+            rel = r.get('relacao')
+            partes.append(f'{nome}, seu {rel}' if rel else nome)
+        return f'Sim, {len(conhecidos)} pessoas: {"; ".join(partes)}.'
 
-    if desconhecidos and not conhecidos:
-        qtd = len(desconhecidos)
-        if qtd == 1:
-            return 'Sim, estou vendo um rosto, mas ainda não o reconheço. Diga "cadastrar essa pessoa" para salvá-lo.'
-        return f'Sim, estou vendo {qtd} rostos que ainda não reconheço. Diga "cadastrar essa pessoa" para salvar.'
+    if qtd_desconhecidos > 0 and not conhecidos:
+        if qtd_desconhecidos == 1:
+            return 'Um rosto desconhecido. Diga "cadastrar essa pessoa" para salvar.'
+        return f'{qtd_desconhecidos} rostos desconhecidos. Diga "cadastrar essa pessoa" para salvar.'
 
-    nomes = ', '.join(r.get('nome', '?') for r in conhecidos)
-    return (
-        f'Estou vendo {len(conhecidos)} pessoa(s) conhecida(s): {nomes}, '
-        f'e {len(desconhecidos)} rosto(s) desconhecido(s).'
-    )
+    nomes = []
+    for r in conhecidos:
+        nome = r.get('nome', '?')
+        rel = r.get('relacao')
+        nomes.append(f'{nome}, seu {rel}' if rel else nome)
+    return f'{", ".join(nomes)} e {qtd_desconhecidos} rosto(s) desconhecido(s).'
 
 
-def gerar_resposta_voz(pergunta: str, deteccoes: List[Dict], rostos: List[Dict]) -> str:
+def gerar_resposta_voz(
+    pergunta: str,
+    deteccoes: List[Dict],
+    rostos: List[Dict],
+    catalogo: Optional[Dict[str, dict]] = None,
+) -> str:
     resposta_direta = _responder_pergunta_rostos(pergunta, rostos)
     if resposta_direta:
-        return resposta_direta
+        return _limpar_resposta_fala(resposta_direta)
 
     if not glm_disponivel():
         return 'Serviço de IA indisponível no momento.'
 
-    contexto = _formatar_contexto_voz(deteccoes, rostos)
+    contexto = _formatar_contexto_voz(deteccoes, rostos, catalogo)
     user_content = f"""Cena atual da câmera:
 {contexto}
 
@@ -599,14 +652,14 @@ Pergunta do usuário: "{pergunta}"
 
 Responda de forma útil e acessível:"""
 
-    return glm_chat(
+    return _limpar_resposta_fala(glm_chat(
         messages=[
             {'role': 'system', 'content': SYSTEM_PROMPT_VOZ},
             {'role': 'user', 'content': user_content},
         ],
-        max_tokens=200,
-        temperature=0.7,
-    )
+        max_tokens=120,
+        temperature=0.5,
+    ))
 
 
 def transcrever_audio(audio_bytes: bytes) -> str:
@@ -708,7 +761,12 @@ def processar_pergunta_voz(
                 cadastro_ativo = cadastro_sessao.em_andamento()
 
     if resposta is None:
-        resposta = gerar_resposta_voz(transcricao, deteccoes_atuais, rostos_atuais)
+        catalogo = None
+        if occhio.face_registry:
+            catalogo = occhio.face_registry.get_catalogo()
+        resposta = gerar_resposta_voz(transcricao, deteccoes_atuais, rostos_atuais, catalogo)
+    else:
+        resposta = _limpar_resposta_fala(resposta)
 
     audio_b64_out = None
     audio_erro = None
@@ -907,6 +965,14 @@ def stream_ws(ws):
 def health():
     try:
         occhio = get_occhio_instance()
+        store = occhio.face_store
+        db_mysql = getattr(store, 'is_mysql', lambda: False)()
+        rostos_cadastrados = []
+        if store and hasattr(store, 'list_faces'):
+            try:
+                rostos_cadastrados = store.list_faces()
+            except Exception:
+                pass
         return jsonify({
             "sucesso": True,
             "timestamp": int(time.time() * 1000),
@@ -918,7 +984,8 @@ def health():
                 "glm_interpreter": getattr(occhio.interpreter, 'glm_disponivel', False),
                 "whisper": occhio.whisper_disponivel,
                 "modelo": "YOLOv8s + glm-5"
-            }
+            },
+            "rostos": rostos_cadastrados,
         })
     except Exception as e:
         return jsonify({

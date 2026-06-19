@@ -19,23 +19,27 @@ class FaceDetector:
         logger.info("Detector de faces inicializado com sucesso.")
 
     def carregar_encodings(self, encodings, names):
-        """Carrega encodings conhecidos com validação"""
+        """Carrega encodings conhecidos — um encoding por nome (evita duplicatas do banco)."""
         self.known_face_encodings = []
         self.known_face_names = []
-        
-        # Filtrar apenas encodings válidos e nomes não "Desconhecido"
+        vistos = set()
+
         for encoding, name in zip(encodings, names):
-            if (encoding is not None and 
-                len(encoding) == 128 and 
-                name.strip().lower() not in ['desconhecido', 'unknown', '']):
-                
-                self.known_face_encodings.append(encoding)
-                self.known_face_names.append(name.strip())
-        
-        logger.info(f"Carregados {len(self.known_face_encodings)} encodings de faces válidos.")
-        
-        if self.known_face_encodings:
-            logger.info(f"Nomes cadastrados: {list(set(self.known_face_names))}")
+            if (encoding is None or len(encoding) != 128):
+                continue
+            nome = name.strip()
+            if nome.lower() in ('desconhecido', 'unknown', ''):
+                continue
+            chave = nome.lower()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            self.known_face_encodings.append(encoding)
+            self.known_face_names.append(nome)
+
+        logger.info(f"Carregados {len(self.known_face_encodings)} rosto(s) único(s).")
+        if self.known_face_names:
+            logger.info(f"Nomes cadastrados: {self.known_face_names}")
 
     def detectar_faces(self, frame):
         """
@@ -271,6 +275,44 @@ class FaceDetector:
             logger.error(f'Erro ao extrair encoding: {e}')
             return None, 'Erro ao processar o rosto.'
 
+    @staticmethod
+    def _iou_box(a, b):
+        """IoU entre duas caixas normalizadas {x, y, w, h}."""
+        ax2, ay2 = a['x'] + a['w'], a['y'] + a['h']
+        bx2, by2 = b['x'] + b['w'], b['y'] + b['h']
+        ix1, iy1 = max(a['x'], b['x']), max(a['y'], b['y'])
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+        if inter <= 0:
+            return 0.0
+        area_a = a['w'] * a['h']
+        area_b = b['w'] * b['h']
+        return inter / (area_a + area_b - inter)
+
+    def _deduplicar_rostos(self, rostos):
+        """Remove caixas sobrepostas e agrupa rostos conhecidos pelo mesmo nome."""
+        if len(rostos) <= 1:
+            return rostos
+
+        rostos = sorted(rostos, key=lambda r: r['w'] * r['h'], reverse=True)
+        unicos = []
+        for rosto in rostos:
+            if any(self._iou_box(rosto, u) > 0.4 for u in unicos):
+                continue
+            unicos.append(rosto)
+
+        por_nome = {}
+        desconhecidos = []
+        for r in unicos:
+            if r.get('conhecido') and r.get('nome'):
+                chave = r['nome'].lower()
+                if chave not in por_nome or r['confianca'] > por_nome[chave]['confianca']:
+                    por_nome[chave] = r
+            else:
+                desconhecidos.append(r)
+
+        return list(por_nome.values()) + desconhecidos
+
     def detectar_faces_bbox(self, frame):
         """Detecta rostos e retorna bbox normalizadas para o canvas."""
         try:
@@ -282,8 +324,14 @@ class FaceDetector:
 
             encodings = face_recognition.face_encodings(rgb, locations)
             resultado = []
+            area_min = 0.008 * largura * altura
 
             for (top, right, bottom, left), face_encoding in zip(locations, encodings):
+                w = right - left
+                h = bottom - top
+                if w * h < area_min:
+                    continue
+
                 nome = 'Desconhecido'
                 confianca = 0.0
 
@@ -295,8 +343,6 @@ class FaceDetector:
                     if dist <= self.tolerance and confianca >= self.min_confidence:
                         nome = self.known_face_names[best]
 
-                w = right - left
-                h = bottom - top
                 resultado.append({
                     'nome': nome,
                     'confianca': round(confianca, 2),
@@ -306,7 +352,8 @@ class FaceDetector:
                     'w': round(w / largura, 4),
                     'h': round(h / altura, 4),
                 })
-            return resultado
+
+            return self._deduplicar_rostos(resultado)
         except Exception as e:
             logger.error(f'Erro em detectar_faces_bbox: {e}')
             return []

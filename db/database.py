@@ -1,5 +1,6 @@
 """
 Módulo de Gerenciamento de Banco de Dados para Cloud
+Tabela: user_rec_facial (imgID, imgVetor, imgNome, imgData, imgRelacao, imgUser, imgLabel, avisar)
 """
 
 import logging
@@ -7,13 +8,19 @@ import pickle
 import numpy as np
 import pymysql
 from datetime import datetime
-from typing import List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional
 import time
 import threading
 
 from db.config import get_cloud_db_config
 
 logger = logging.getLogger("occhio.db.database")
+
+SQL_SELECT_FACES = """
+    SELECT imgID, imgVetor, imgNome, imgLabel, imgRelacao, imgUser, avisar, imgData
+    FROM user_rec_facial
+    ORDER BY imgID
+"""
 
 class DatabaseManager:
     """Classe utilitária para interagir com o banco de dados MySQL em cloud."""
@@ -76,63 +83,105 @@ class DatabaseManager:
     # Operações com rostos
     # -------------------
 
+    def _parse_encoding(self, encoding_bytes, nome_ref: str) -> Optional[np.ndarray]:
+        if not isinstance(encoding_bytes, bytes):
+            logger.warning(f"Encoding inválido para {nome_ref}: não é bytes")
+            return None
+        try:
+            encoding = pickle.loads(encoding_bytes)
+            if encoding is None:
+                return None
+            arr = np.asarray(encoding, dtype=np.float64)
+            if arr.shape != (128,):
+                logger.warning(f"Encoding inválido para {nome_ref}: shape {arr.shape}")
+                return None
+            return arr
+        except Exception as e:
+            logger.warning(f"Erro ao decodificar vetor de {nome_ref}: {e}")
+            return None
+
+    @staticmethod
+    def _nome_exibicao(img_nome: str, img_label: Optional[str]) -> str:
+        nome = (img_nome or img_label or '').strip()
+        return nome if nome else 'desconhecido'
+
+    def _fetch_all_faces(self):
+        cursor = self._get_cursor()
+        cursor.execute(SQL_SELECT_FACES)
+        resultados = cursor.fetchall()
+        cursor.close()
+        return resultados
+
     def load_face_encodings(self) -> Tuple[List[np.ndarray], List[str], List[int]]:
-        """Carrega encodings de rostos existentes no banco de dados."""
+        """Carrega imgVetor + imgNome de user_rec_facial para reconhecimento."""
         with self._lock:
             try:
-                cursor = self._get_cursor()
-                cursor.execute("SELECT imgVetor, imgLabel, imgID FROM user_rec_facial")
-                resultados = cursor.fetchall()
-                cursor.close()
-
                 encodings, nomes, ids = [], [], []
-                for encoding_bytes, label, face_id in resultados:
-                    try:
-                        if not isinstance(encoding_bytes, bytes):
-                            logger.warning(f"Encoding inválido para {label}: não é bytes")
-                            continue
-
-                        encoding = pickle.loads(encoding_bytes)
-                        if encoding is not None:
-                            encodings.append(encoding)
-                            nomes.append(label if label else "desconhecido")
-                            ids.append(face_id)
-                    except Exception as e:
-                        logger.warning(f"Erro ao carregar encoding para {label}: {e}")
+                for row in self._fetch_all_faces():
+                    img_id, encoding_bytes, img_nome, img_label, *_ = row
+                    nome = self._nome_exibicao(img_nome, img_label)
+                    if nome.lower() in ('desconhecido', 'unknown'):
                         continue
+                    encoding = self._parse_encoding(encoding_bytes, nome)
+                    if encoding is not None:
+                        encodings.append(encoding)
+                        nomes.append(nome)
+                        ids.append(img_id)
 
-                logger.info(f"📥 Carregados {len(encodings)} encodings de faces.")
+                logger.info(f"📥 MySQL: {len(encodings)} rosto(s) carregado(s) — {nomes}")
                 return encodings, nomes, ids
 
             except Exception as e:
                 logger.error(f"❌ Erro ao carregar encodings: {e}")
                 return [], [], []
 
-    def face_exists(self, face_encoding: np.ndarray, threshold: float = 0.6) -> bool:
-        """Verifica se um rosto já está cadastrado no banco."""
+    def get_faces_catalog(self) -> Dict[str, dict]:
+        """Mapa nome → metadados (parentesco, avisar) para uso na IA."""
         with self._lock:
             try:
-                cursor = self._get_cursor()
-                cursor.execute("SELECT imgVetor FROM user_rec_facial")
-                resultados = cursor.fetchall()
-                cursor.close()
-
-                for (encoding_bytes,) in resultados:
-                    try:
-                        encoding_db = pickle.loads(encoding_bytes)
-                        distancia = np.linalg.norm(
-                            np.array(face_encoding) - np.array(encoding_db)
-                        )
-                        if distancia < threshold:
-                            return True
-                    except Exception as e:
-                        logger.warning(f"Erro ao comparar encodings: {e}")
+                catalog: Dict[str, dict] = {}
+                for row in self._fetch_all_faces():
+                    img_id, _, img_nome, img_label, relacao, img_user, avisar, img_data = row
+                    nome = self._nome_exibicao(img_nome, img_label)
+                    if nome.lower() in ('desconhecido', 'unknown'):
                         continue
+                    chave = nome.lower()
+                    catalog[chave] = {
+                        'id': img_id,
+                        'nome': nome,
+                        'relacao': (relacao or 'conhecido').strip(),
+                        'label': (img_label or nome).strip(),
+                        'user': img_user or 0,
+                        'avisar': bool(avisar),
+                        'data_cadastro': img_data.isoformat() if img_data else None,
+                    }
+                return catalog
+            except Exception as e:
+                logger.error(f"❌ Erro ao montar catálogo de rostos: {e}")
+                return {}
 
-                return False
+    def face_exists(self, face_encoding: np.ndarray, threshold: float = 0.6) -> bool:
+        """Verifica se imgVetor já existe na tabela (evita cadastro duplicado)."""
+        return self.find_existing_name(face_encoding, threshold) is not None
+
+    def find_existing_name(self, face_encoding: np.ndarray, threshold: float = 0.6) -> Optional[str]:
+        with self._lock:
+            try:
+                import face_recognition
+                query_vec = np.asarray(face_encoding, dtype=np.float64)
+                for row in self._fetch_all_faces():
+                    img_id, encoding_bytes, img_nome, img_label, *_ = row
+                    nome = self._nome_exibicao(img_nome, img_label)
+                    encoding_db = self._parse_encoding(encoding_bytes, nome)
+                    if encoding_db is None:
+                        continue
+                    dist = float(face_recognition.face_distance([encoding_db], query_vec)[0])
+                    if dist < threshold:
+                        return nome
+                return None
             except Exception as e:
                 logger.error(f"❌ Erro ao verificar rosto cadastrado: {e}")
-                return False
+                return None
 
     def save_face(
         self,
@@ -189,25 +238,23 @@ class DatabaseManager:
                 logger.error(f"❌ Erro ao carregar rostos salvos: {e}")
                 return []
 
-    # NOVO: Endpoints para API de gerenciamento de rostos
     def list_faces(self) -> List[dict]:
-        """Lista todas as faces cadastradas."""
+        """Lista rostos cadastrados (sem imgVetor — só metadados)."""
         with self._lock:
             try:
-                cursor = self._get_cursor()
-                cursor.execute("SELECT imgID, imgNome, imgLabel, imgData FROM user_rec_facial")
-                resultados = cursor.fetchall()
-                cursor.close()
-
                 faces = []
-                for face_id, nome, label, data in resultados:
+                for row in self._fetch_all_faces():
+                    img_id, _, img_nome, img_label, relacao, img_user, avisar, img_data = row
+                    nome = self._nome_exibicao(img_nome, img_label)
                     faces.append({
-                        "id": face_id,
+                        "id": img_id,
                         "nome": nome,
-                        "label": label,
-                        "data_cadastro": data.isoformat() if data else None
+                        "label": (img_label or nome).strip(),
+                        "relacao": (relacao or 'conhecido').strip(),
+                        "user": img_user or 0,
+                        "avisar": bool(avisar),
+                        "data_cadastro": img_data.isoformat() if img_data else None,
                     })
-                
                 return faces
             except Exception as e:
                 logger.error(f"❌ Erro ao listar faces: {e}")
@@ -237,12 +284,14 @@ class DatabaseManager:
                 return False
 
     def get_nomes_com_aviso(self) -> List[str]:
-        """Nomes de pessoas cadastradas com aviso ativo."""
+        """Nomes (imgNome) com avisar=1."""
         with self._lock:
             try:
                 cursor = self._get_cursor()
-                cursor.execute("SELECT imgNome FROM user_rec_facial WHERE avisar = 1")
-                nomes = [row[0] for row in cursor.fetchall()]
+                cursor.execute(
+                    "SELECT DISTINCT imgNome FROM user_rec_facial WHERE avisar = 1"
+                )
+                nomes = [row[0] for row in cursor.fetchall() if row[0]]
                 cursor.close()
                 return nomes
             except Exception as e:
@@ -250,16 +299,24 @@ class DatabaseManager:
                 return []
 
     def get_relacao(self, nome: str) -> Optional[str]:
+        """Parentesco (imgRelacao) do rosto pelo imgNome."""
         with self._lock:
             try:
                 cursor = self._get_cursor()
                 cursor.execute(
-                    "SELECT imgRelacao FROM user_rec_facial WHERE imgNome = %s ORDER BY imgID DESC LIMIT 1",
-                    (nome,),
+                    """
+                    SELECT imgRelacao FROM user_rec_facial
+                    WHERE LOWER(imgNome) = LOWER(%s)
+                    ORDER BY imgID DESC LIMIT 1
+                    """,
+                    (nome.strip(),),
                 )
                 row = cursor.fetchone()
                 cursor.close()
-                return row[0] if row else None
+                return row[0].strip() if row and row[0] else None
             except Exception as e:
                 logger.error(f"❌ Erro ao buscar relação: {e}")
                 return None
+
+    def is_mysql(self) -> bool:
+        return True

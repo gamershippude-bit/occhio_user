@@ -18,3 +18,4 @@ pillow==10.0.1
 waitress==2.1.2
 elevenlabs>=1.0.0
 zai-sdk>=0.2.2
+python-dotenv>=1.0.0

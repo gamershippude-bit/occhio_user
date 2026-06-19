@@ -1,10 +1,9 @@
 """
-Armazenamento de rostos — MySQL ou memória local (fallback).
+Armazenamento de rostos — MySQL (user_rec_facial) ou memória local (fallback).
 """
 import logging
-import pickle
+import os
 import threading
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -29,13 +28,21 @@ class InMemoryFaceStore:
                 ids.append(r['id'])
             return encodings, nomes, ids
 
+    def find_existing_name(self, face_encoding: np.ndarray, threshold: float = 0.6) -> Optional[str]:
+        try:
+            import face_recognition
+            query = np.asarray(face_encoding, dtype=np.float64)
+            with self._lock:
+                for r in self._rostos:
+                    dist = float(face_recognition.face_distance([r['encoding']], query)[0])
+                    if dist < threshold:
+                        return r['nome']
+        except Exception:
+            pass
+        return None
+
     def face_exists(self, face_encoding: np.ndarray, threshold: float = 0.6) -> bool:
-        with self._lock:
-            for r in self._rostos:
-                dist = np.linalg.norm(np.array(face_encoding) - np.array(r['encoding']))
-                if dist < threshold:
-                    return True
-        return False
+        return self.find_existing_name(face_encoding, threshold) is not None
 
     def save_face(
         self,
@@ -71,6 +78,25 @@ class InMemoryFaceStore:
                     return r.get('relacao')
         return None
 
+    def get_faces_catalog(self) -> Dict[str, dict]:
+        with self._lock:
+            catalog = {}
+            for r in self._rostos:
+                chave = r['nome'].lower()
+                catalog[chave] = {
+                    'id': r['id'],
+                    'nome': r['nome'],
+                    'relacao': r.get('relacao', 'conhecido'),
+                    'label': r.get('label', r['nome']),
+                    'user': 0,
+                    'avisar': r.get('avisar', True),
+                    'data_cadastro': None,
+                }
+            return catalog
+
+    def is_mysql(self) -> bool:
+        return False
+
     def list_faces(self) -> List[dict]:
         with self._lock:
             return [
@@ -80,13 +106,25 @@ class InMemoryFaceStore:
 
 
 def criar_face_store():
-    """Tenta MySQL; se falhar, usa memória."""
-    if not __import__('os').getenv('DB_HOST'):
-        logger.warning('⚠️ DB_HOST não configurado — rostos salvos em memória (perdem-se ao reiniciar)')
+    """Conecta ao MySQL (tabela user_rec_facial) ou usa memória se DB_HOST ausente."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    if not os.getenv('DB_HOST'):
+        logger.warning(
+            '⚠️ DB_HOST não configurado — rostos só em memória. '
+            'Configure DB_* no .env para usar MySQL (user_rec_facial).'
+        )
         return InMemoryFaceStore()
     try:
         from db.database import DatabaseManager
-        return DatabaseManager()
+        store = DatabaseManager()
+        catalog = store.get_faces_catalog()
+        logger.info(f'✅ MySQL conectado — {len(catalog)} rosto(s) em user_rec_facial')
+        return store
     except Exception as e:
         logger.error(f'❌ MySQL indisponível ({e}) — usando memória')
         return InMemoryFaceStore()

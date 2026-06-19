@@ -15,8 +15,17 @@ PALAVRAS_CADASTRO = (
     'cadastrar', 'registrar', 'adicionar', 'salvar', 'gravar',
     'conhecer', 'memorizar', 'lembrar', 'anotar',
 )
-PALAVRAS_SIM = ('sim', 'quero', 'pode', 'claro', 'por favor', 'com certeza', 'positivo', 'ok')
-PALAVRAS_NAO = ('não', 'nao', 'negativo', 'deixa', 'dispensa', 'sem aviso')
+PALAVRAS_SIM = (
+    'sim', 'si', 's', 'quero', 'pode', 'claro', 'por favor', 'com certeza',
+    'positivo', 'ok', 'okay', 'isso', 'isso mesmo', 'exato', 'certo', 'confirmo',
+    'pode avisar', 'quero sim', 'com certeza sim', 'uhum', 'aham', 'hum hum',
+)
+PALAVRAS_NAO = (
+    'não', 'nao', 'n', 'negativo', 'deixa', 'dispensa', 'sem aviso', 'não quero',
+    'nao quero', 'de jeito nenhum', 'nem', 'nunca', 'prefiro não', 'prefiro nao',
+    'não precisa', 'nao precisa', 'tá bom', 'ta bom', 'está bom', 'esta bom',
+)
+RESPOSTAS_SIM_CURTAS = frozenset({'s', 'si', 'sim', 'n', 'nao', 'não'})
 
 
 @dataclass
@@ -26,6 +35,7 @@ class CadastroSessao:
     nome: str = ''
     relacao: str = ''
     iniciado_em: float = 0.0
+    tentativas_aviso: int = 0
 
     def reset(self) -> None:
         self.estado = 'idle'
@@ -33,6 +43,7 @@ class CadastroSessao:
         self.nome = ''
         self.relacao = ''
         self.iniciado_em = 0.0
+        self.tentativas_aviso = 0
 
     def em_andamento(self) -> bool:
         return self.estado != 'idle'
@@ -61,11 +72,31 @@ def detectar_intencao_cadastro(texto: str) -> bool:
 
 
 def detectar_sim(texto: str) -> Optional[bool]:
-    t = texto.lower().strip()
-    if any(p in t for p in PALAVRAS_SIM):
+    t = re.sub(r'[^\w\sáàâãéêíóôõúüç]', ' ', texto.lower().strip())
+    t = re.sub(r'\s+', ' ', t).strip()
+    if not t:
+        return None
+
+    if t in RESPOSTAS_SIM_CURTAS:
+        return t in ('s', 'si', 'sim')
+
+    tokens = set(t.split())
+    if tokens & {'sim', 'si', 's'} and not tokens & {'nao', 'não', 'n'}:
         return True
-    if any(p in t for p in PALAVRAS_NAO):
+    if tokens & {'nao', 'não', 'n'} and not tokens & {'sim', 'si'}:
         return False
+
+    if re.search(r'\bn[aã]o\b', t):
+        return False
+    if re.search(r'\bsim\b', t):
+        return True
+
+    for p in PALAVRAS_NAO:
+        if p in t and len(p) >= 3:
+            return False
+    for p in PALAVRAS_SIM:
+        if p in t and len(p) >= 2:
+            return True
     return None
 
 
@@ -87,6 +118,7 @@ class FaceRegistry:
         self.face_detector = face_detector
         self.face_store = face_store
         self._alertas_recentes: Dict[str, float] = {}
+        self._catalog: Dict[str, dict] = {}
         self.alerta_cooldown = 25.0
 
     def recarregar_rostos(self) -> int:
@@ -95,11 +127,25 @@ class FaceRegistry:
         try:
             encodings, nomes, _ = self.face_store.load_face_encodings()
             self.face_detector.carregar_encodings(encodings, nomes)
-            logger.info(f'📥 {len(nomes)} rosto(s) carregado(s) do banco')
+            if hasattr(self.face_store, 'get_faces_catalog'):
+                self._catalog = self.face_store.get_faces_catalog()
+            logger.info(f'📥 {len(nomes)} rosto(s) do banco: {list(self._catalog.values())}')
             return len(nomes)
         except Exception as e:
             logger.error(f'Erro ao recarregar rostos: {e}')
             return 0
+
+    def _meta_rosto(self, nome: str) -> Optional[dict]:
+        if not nome:
+            return None
+        meta = self._catalog.get(nome.lower())
+        if meta:
+            return meta
+        if self.face_store:
+            rel = self.face_store.get_relacao(nome)
+            if rel:
+                return {'nome': nome, 'relacao': rel}
+        return None
 
     def contar_rostos_no_frame(self, frame) -> int:
         if not self.face_detector or not hasattr(self.face_detector, 'contar_rostos'):
@@ -140,35 +186,45 @@ class FaceRegistry:
             if erro:
                 return erro
             if self.face_store and self.face_store.face_exists(encoding):
-                return 'Essa pessoa já parece estar cadastrada. Quer cadastrar outra pessoa?'
+                existente = None
+                if hasattr(self.face_store, 'find_existing_name'):
+                    existente = self.face_store.find_existing_name(encoding)
+                if existente:
+                    meta = self._meta_rosto(existente)
+                    rel = meta.get('relacao') if meta else None
+                    if rel:
+                        return f'{existente} já está cadastrado como {rel}.'
+                    return f'{existente} já está cadastrado.'
+                return 'Essa pessoa já parece estar cadastrada.'
             sessao.encoding = encoding
             sessao.estado = 'aguardando_nome'
             sessao.iniciado_em = time.time()
-            return 'Perfeito! Qual o nome da pessoa à sua frente?'
+            return 'Qual o nome dessa pessoa?'
 
         if sessao.estado == 'aguardando_nome':
             nome = extrair_nome(texto)
             if len(nome) < 2:
-                return 'Não entendi o nome. Pode repetir?'
+                return 'Repita o nome, por favor.'
             sessao.nome = nome
             sessao.estado = 'aguardando_relacao'
-            return f'Qual é a sua relação ou parentesco com {nome}?'
+            return f'Qual sua relação com {nome}?'
 
         if sessao.estado == 'aguardando_relacao':
             relacao = texto.strip()
             if len(relacao) < 2:
-                return 'Pode me dizer como você conhece essa pessoa? Por exemplo: amigo, irmão, colega.'
+                return 'Exemplo: amigo, irmão ou colega.'
             sessao.relacao = relacao
             sessao.estado = 'aguardando_aviso'
-            return (
-                f'Perfeito! {sessao.nome} será cadastrado(a) como seu {relacao}. '
-                f'Quer que eu avise quando eu vê-lo(a) de novo?'
-            )
+            sessao.tentativas_aviso = 0
+            return f'{sessao.nome} será salvo como {relacao}. Avisar quando aparecer?'
 
         if sessao.estado == 'aguardando_aviso':
             decisao = detectar_sim(texto)
             if decisao is None:
-                return 'Responda sim ou não: quer que eu avise quando eu vir essa pessoa de novo?'
+                sessao.tentativas_aviso += 1
+                if sessao.tentativas_aviso >= 2:
+                    return self._finalizar_cadastro(sessao, avisar=False)
+                return 'Diga sim ou não.'
             return self._finalizar_cadastro(sessao, avisar=decisao)
 
         return None
@@ -200,8 +256,8 @@ class FaceRegistry:
 
         self.recarregar_rostos()
         if avisar:
-            return f'Pronto! {nome} está cadastrado(a). Vou avisar quando eu vê-lo(a) de novo.'
-        return f'Pronto! {nome} está cadastrado(a). Não vou avisar quando aparecer.'
+            return f'Pronto! {nome} cadastrado. Vou avisar quando aparecer.'
+        return f'Pronto! {nome} cadastrado, sem avisos.'
 
     def cancelar(self, sessao: CadastroSessao) -> str:
         if sessao.em_andamento():
@@ -212,7 +268,15 @@ class FaceRegistry:
     def detectar_faces_stream(self, frame) -> List[Dict[str, Any]]:
         if not self.face_detector or not hasattr(self.face_detector, 'detectar_faces_bbox'):
             return []
-        return self.face_detector.detectar_faces_bbox(frame)
+        rostos = self.face_detector.detectar_faces_bbox(frame)
+        for rosto in rostos:
+            if not rosto.get('conhecido'):
+                continue
+            meta = self._meta_rosto(rosto.get('nome', ''))
+            if meta:
+                rosto['relacao'] = meta.get('relacao')
+                rosto['avisar'] = meta.get('avisar')
+        return rostos
 
     def verificar_alertas(self, faces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not self.face_store:
@@ -231,10 +295,14 @@ class FaceRegistry:
             if agora - ultimo < self.alerta_cooldown:
                 continue
             self._alertas_recentes[nome] = agora
-            relacao = self.face_store.get_relacao(nome) or 'conhecido'
+            meta = self._meta_rosto(nome) or {}
+            relacao = meta.get('relacao') or 'conhecido'
             alertas.append({
                 'nome': nome,
                 'relacao': relacao,
-                'mensagem': f'Estou vendo {nome}, seu {relacao}.',
+                'mensagem': f'{nome} está aqui, seu {relacao}.',
             })
         return alertas
+
+    def get_catalogo(self) -> Dict[str, dict]:
+        return dict(self._catalog)
