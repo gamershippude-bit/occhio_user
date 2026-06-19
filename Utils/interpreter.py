@@ -5,6 +5,7 @@ Interpreter
 import logging
 import os
 import time
+import concurrent.futures
 import numpy as np
 from datetime import datetime, timezone, timedelta
 
@@ -21,18 +22,7 @@ class Interpreter:
         
         if glm_api_disponivel():
             logger.info("📦 ZAI API key encontrada")
-            try:
-                logger.info("🧪 Testando conexão GLM...")
-                glm_chat(
-                    messages=[{"role": "user", "content": "Teste"}],
-                    model=self.model_name,
-                    max_tokens=5,
-                )
-                self.glm_disponivel = True
-                logger.info("✅ GLM conectado")
-            except Exception as e:
-                logger.error(f"❌ Erro GLM: {e}")
-                self.glm_disponivel = False
+            self.glm_disponivel = self._testar_conexao_glm()
         else:
             logger.warning("⚠️ Sem ZAI_API_KEY válida - modo local")
             self.glm_disponivel = False
@@ -88,6 +78,26 @@ class Interpreter:
             'donut': 'rosquinha',
             'cake': 'bolo'
         }
+
+    def _testar_conexao_glm(self) -> bool:
+        logger.info('🧪 Testando conexão GLM...')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                glm_chat,
+                messages=[{'role': 'user', 'content': 'ok'}],
+                model=self.model_name,
+                max_tokens=5,
+            )
+            try:
+                future.result(timeout=15)
+                logger.info('✅ GLM conectado')
+                return True
+            except concurrent.futures.TimeoutError:
+                logger.warning('⚠️ GLM não respondeu no warmup — continuando sem teste')
+                return False
+            except Exception as e:
+                logger.warning(f'⚠️ GLM warmup falhou: {e} — continuando')
+                return False
 
     # ========== MÉTODO PARA /processar ==========
 

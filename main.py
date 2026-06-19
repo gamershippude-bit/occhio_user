@@ -856,9 +856,9 @@ class OcchioCloud:
         try:
             from Utils.interpreter import Interpreter
             self.interpreter = Interpreter()
-            logger.info("✅ Interpreter inicializado")
+            logger.info('✅ Interpreter inicializado')
         except Exception as e:
-            logger.error(f"❌ Erro ao inicializar interpreter: {e}")
+            logger.warning(f'⚠️ Interpreter falhou no warmup: {e} — sistema continua sem ele')
             self.interpreter = self._criar_interpreter_local()
 
     def _criar_detector_local(self):
