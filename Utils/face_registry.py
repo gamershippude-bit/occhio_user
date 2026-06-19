@@ -1,5 +1,5 @@
 """
-Fluxo conversacional de cadastro de rostos conhecidos.
+Reconhecimento facial, alertas e operações de rosto.
 """
 import logging
 import re
@@ -10,10 +10,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-PALAVRAS_CADASTRO = (
-    'cadastrar', 'registrar', 'adicionar', 'salvar', 'gravar',
-    'conhecer', 'memorizar', 'lembrar', 'anotar',
-)
 CONFIRMACOES = (
     'sim', 's', 'pode', 'pode ser', 'quero', 'vai', 'claro',
     'beleza', 'tá', 'ta', 'ok', 'isso', 'isso mesmo', 'exato',
@@ -28,33 +24,6 @@ NEGACOES = (
 PALAVRAS_SIM = CONFIRMACOES
 PALAVRAS_NAO = NEGACOES
 RESPOSTAS_SIM_CURTAS = frozenset({'s', 'si', 'sim', 'n', 'nao', 'não'})
-
-
-def detectar_intencao_cadastro(texto: str) -> bool:
-    t = texto.lower()
-    frases_diretas = (
-        'cadastrar rosto', 'cadastrar essa pessoa', 'cadastrar esse rosto',
-        'cadastra essa pessoa', 'cadastra esse rosto', 'cadastra o rosto',
-        'salvar rosto', 'salvar essa pessoa', 'salvar esse rosto',
-        'registrar rosto', 'registrar essa pessoa', 'registrar esse rosto',
-        'identificar rosto', 'identificar essa pessoa', 'identificar esse rosto',
-        'memorizar rosto', 'memorizar essa pessoa', 'memorizar esse rosto',
-        'quero cadastrar', 'quero salvar', 'quero registrar',
-        'adicionar rosto', 'adicionar essa pessoa', 'gravar rosto',
-        'conhecer essa pessoa', 'lembrar essa pessoa', 'anotar essa pessoa',
-    )
-    if any(frase in t for frase in frases_diretas):
-        return True
-    if any(p in t for p in PALAVRAS_CADASTRO) and any(
-        x in t for x in ('pessoa', 'rosto', 'face', 'ele', 'ela', 'essa', 'esse', 'frente', 'câmera', 'camera')
-    ):
-        return True
-    if re.search(
-        r'\b(cadastr\w+|salv\w+|registr\w+|memoriz\w+|lembr\w+|anot\w+)\b.+\bcomo\b',
-        t,
-    ):
-        return True
-    return False
 
 
 def detectar_sim(texto: str) -> Optional[bool]:
@@ -87,7 +56,7 @@ def detectar_sim(texto: str) -> Optional[bool]:
 
 
 class FaceRegistry:
-    """Gerencia cadastro conversacional e alertas de rostos conhecidos."""
+    """Gerencia reconhecimento facial e alertas de rostos conhecidos."""
 
     def __init__(self, face_detector=None, face_store=None):
         self.face_detector = face_detector
@@ -148,19 +117,6 @@ class FaceRegistry:
 
     def capturar_encoding_async(self, occhio, timeout: float = 5.0) -> Tuple[Optional[np.ndarray], Optional[str]]:
         return self.capturar_encoding_do_frame_atual(occhio, timeout)
-
-    def sugerir_cadastro_se_desconhecido(self, rostos: list, occhio=None) -> Optional[str]:
-        """Sugere cadastro quando há rosto desconhecido e nenhum cadastro em andamento."""
-        if occhio and (
-            getattr(occhio, '_cadastro_pendente', None)
-            or getattr(occhio, '_aguardando_nome_simples', False)
-            or getattr(occhio, '_aguardando_relacao_simples', False)
-        ):
-            return None
-        desconhecidos = [r for r in rostos if not r.get('conhecido')]
-        if not desconhecidos:
-            return None
-        return 'Não reconheço esse rosto. Quer que eu aprenda quem é?'
 
     def remover_por_nome(self, nome: str) -> bool:
         """Remove rosto pelo nome (case-insensitive, busca parcial)."""
@@ -242,12 +198,6 @@ def recarregar_estado_facial(occhio) -> bool:
 
         qtd = occhio.face_registry.recarregar_rostos()
         occhio._last_rostos = []
-        if hasattr(occhio, '_cadastro_pendente'):
-            occhio._cadastro_pendente = None
-        if hasattr(occhio, '_aguardando_nome_simples'):
-            occhio._aguardando_nome_simples = False
-        if hasattr(occhio, '_aguardando_relacao_simples'):
-            occhio._aguardando_relacao_simples = False
 
         logger.info(f'✅ Estado facial recarregado: {qtd} rosto(s)')
         return True

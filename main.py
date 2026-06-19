@@ -27,12 +27,7 @@ from flask_sock import Sock
 from typing import Dict, List, Any, Optional
 
 from Utils.glm_client import chat as glm_chat, glm_disponivel
-from Utils.face_registry import (
-    FaceRegistry,
-    detectar_intencao_cadastro,
-    detectar_sim,
-    recarregar_estado_facial,
-)
+from Utils.face_registry import FaceRegistry, detectar_sim, recarregar_estado_facial
 from Detectors.face_detector import _DLIB_LOCK
 from Utils.face_store import criar_face_store
 from Utils.conversation_memory import ConversationMemory
@@ -566,270 +561,23 @@ def montar_catalogo_str(catalogo) -> str:
         return 'Erro ao carregar lista de pessoas cadastradas.'
 
 
-def _contar_pessoas_catalogo(catalogo) -> int:
-    if not catalogo:
-        return 0
-    return sum(1 for v in catalogo.values() if str(v.get('nome', '')).strip())
-
-
-def _cadastro_ativo(occhio) -> bool:
-    return (
-        getattr(occhio, '_cadastro_pendente', None) is not None
-        or getattr(occhio, '_aguardando_nome_simples', False)
-        or getattr(occhio, '_aguardando_relacao_simples', False)
+def _formatar_historico_recente(historico: List[dict]) -> str:
+    if not historico:
+        return 'Nenhuma mensagem anterior nesta sessão.'
+    return '\n'.join(
+        f"{m['role'].upper()}: {m['content']}"
+        for m in historico[-6:]
     )
 
 
-def _limpar_modo_cadastro(occhio) -> None:
-    occhio._cadastro_pendente = None
-    occhio._aguardando_nome_simples = False
-    occhio._aguardando_relacao_simples = False
-
-
-def _valor_cadastro_campo(val) -> Optional[str]:
-    if val is None:
-        return None
-    if isinstance(val, str):
-        t = val.strip()
-        if not t or t.lower() in ('null', 'none', 'n/a'):
-            return None
-        return t
-    return str(val).strip() or None
-
-
-def _bool_avisar_cadastro(val) -> bool:
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, str):
-        return val.strip().lower() in ('true', 'sim', 's', 'yes', '1')
-    return bool(val) if val is not None else False
-
-
-def extrair_dados_cadastro_via_glm(transcricao: str) -> Optional[dict]:
-    """Pede ao GLM para extrair nome, relação e aviso da frase do usuário."""
-    transcricao = (transcricao or '').strip()
-    if not transcricao or not glm_disponivel():
-        return None
-
-    prompt = f"""Extraia dados de cadastro da frase do usuário.
-
-Frase: "{transcricao}"
-
-Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem markdown:
-{{"nome": "nome mencionado ou null", "relacao": "relação mencionada ou null", "avisar": false}}
-
-Se não há nome, coloque null. Se não há relação, coloque null."""
-
-    resposta_bruta = ''
-    try:
-        resposta_bruta = glm_chat(
-            [
-                {'role': 'system', 'content': 'Você extrai dados estruturados. Responda somente JSON válido.'},
-                {'role': 'user', 'content': prompt},
-            ],
-            max_tokens=150,
-            temperature=0.0,
-        )
-        logger.debug("🔍 GLM cadastro resposta bruta: '%s'", resposta_bruta)
-
-        if not resposta_bruta or not resposta_bruta.strip():
-            logger.error('❌ GLM retornou resposta vazia para extração de cadastro')
-            return None
-
-        texto = re.sub(r'```json|```', '', resposta_bruta).strip()
-        match = re.search(r'\{.*\}', texto, re.DOTALL)
-        if match:
-            texto = match.group(0)
-
-        dados = json.loads(texto)
-
-        for campo in ('nome', 'relacao'):
-            if dados.get(campo) in ('null', 'None', '', 'undefined'):
-                dados[campo] = None
-
-        logger.info('✅ Dados extraídos: %s', dados)
-        return dados
-
-    except json.JSONDecodeError as e:
-        logger.error("❌ JSON inválido na extração de cadastro: '%s' | erro: %s", resposta_bruta, e)
-        return None
-    except Exception as e:
-        logger.error('❌ Erro ao extrair dados de cadastro: %s', e)
-        return None
-
-
-def _salvar_cadastro_rosto(occhio, nome: str, relacao: str, avisar: bool) -> str:
-    if not occhio.face_registry or not occhio.face_registry.face_store:
-        return 'Cadastro facial indisponível no momento.'
-
-    encoding, erro = occhio.face_registry.capturar_encoding_async(occhio)
-    if erro:
-        return erro
-    if encoding is None:
-        return 'Não encontrei um rosto na câmera. Pode se aproximar?'
-
-    with _DLIB_LOCK:
-        if occhio.face_registry.face_store.face_exists(encoding):
-            existente = occhio.face_registry.face_store.find_existing_name(encoding)
-            if existente:
-                return f'{existente} já está cadastrado.'
-            return 'Essa pessoa já parece estar cadastrada.'
-
-    ok = occhio.face_registry.face_store.save_face(
-        face_encoding=encoding,
-        nome=nome,
-        relacao=relacao,
-        label=nome,
-        avisar=avisar,
-    )
-    if not ok:
-        return 'Não consegui salvar. Tenta de novo.'
-
-    recarregar_estado_facial(occhio)
-    _limpar_modo_cadastro(occhio)
-    fala = f'Pronto, cadastrei {nome} como {relacao}.'
-    if avisar:
-        fala += ' Vou avisar quando ele aparecer.'
-    return fala
-
-
-def _iniciar_modo_cadastro_simples(occhio, pendente: Optional[dict] = None) -> str:
-    """Fallback: perguntas diretas sem parsear JSON via GLM."""
-    pendente = pendente or {}
-    occhio._cadastro_pendente = {
-        'nome': pendente.get('nome'),
-        'relacao': pendente.get('relacao'),
-        'avisar': pendente.get('avisar', False),
-    }
-    if pendente.get('nome') and not pendente.get('relacao'):
-        occhio._aguardando_nome_simples = False
-        occhio._aguardando_relacao_simples = True
-        return f'Perfeito. Qual sua relação com {pendente["nome"]}?'
-
-    occhio._aguardando_nome_simples = True
-    occhio._aguardando_relacao_simples = False
-    return 'Não consegui entender os dados. Pode me dizer o nome da pessoa?'
-
-
-def _processar_cadastro_simples(occhio, transcricao: str) -> str:
-    transcricao = (transcricao or '').strip().strip('.,!? ')
-    pendente = dict(occhio._cadastro_pendente or {})
-    avisar = pendente.get('avisar', False)
-
-    if getattr(occhio, '_aguardando_nome_simples', False):
-        if len(transcricao) < 2:
-            return 'Repita o nome, por favor.'
-        occhio._aguardando_nome_simples = False
-        nome = transcricao
-        occhio._cadastro_pendente = {
-            'nome': nome,
-            'relacao': pendente.get('relacao'),
-            'avisar': avisar,
-        }
-        if pendente.get('relacao'):
-            return _salvar_cadastro_rosto(occhio, nome, pendente['relacao'], avisar)
-        occhio._aguardando_relacao_simples = True
-        return f'Perfeito. Qual sua relação com {nome}?'
-
-    if getattr(occhio, '_aguardando_relacao_simples', False):
-        if len(transcricao) < 2:
-            return 'Exemplo: amigo, irmão ou colega.'
-        occhio._aguardando_relacao_simples = False
-        nome = pendente.get('nome', '')
-        return _salvar_cadastro_rosto(occhio, nome, transcricao, avisar)
-
-    return _iniciar_modo_cadastro_simples(occhio, pendente)
-
-
-def _processar_fluxo_cadastro(occhio, transcricao: str) -> str:
-    """Extrai dados via GLM, completa pendências e salva quando possível."""
-    if not hasattr(occhio, '_cadastro_pendente'):
-        occhio._cadastro_pendente = None
-    if not hasattr(occhio, '_aguardando_nome_simples'):
-        occhio._aguardando_nome_simples = False
-    if not hasattr(occhio, '_aguardando_relacao_simples'):
-        occhio._aguardando_relacao_simples = False
-
-    if occhio._aguardando_nome_simples or occhio._aguardando_relacao_simples:
-        return _processar_cadastro_simples(occhio, transcricao)
-
-    if not glm_disponivel():
-        return _iniciar_modo_cadastro_simples(occhio, occhio._cadastro_pendente)
-
-    pendente = dict(occhio._cadastro_pendente or {})
-    tentativas = int(pendente.get('tentativas', 0))
-    dados_novos = extrair_dados_cadastro_via_glm(transcricao)
-    extracao_falhou = dados_novos is None
-
-    nome = pendente.get('nome') or (_valor_cadastro_campo(dados_novos.get('nome')) if dados_novos else None)
-    relacao = pendente.get('relacao') or (_valor_cadastro_campo(dados_novos.get('relacao')) if dados_novos else None)
-    avisar = pendente.get('avisar', False)
-    if dados_novos and 'avisar' in dados_novos:
-        avisar = _bool_avisar_cadastro(dados_novos.get('avisar'))
-
-    if nome and relacao:
-        return _salvar_cadastro_rosto(occhio, nome, relacao, avisar)
-
-    if extracao_falhou and not (nome or relacao):
-        tentativas += 1
-    elif nome or relacao:
-        tentativas = 0
-
-    if tentativas >= 3:
-        logger.warning('⚠️ Extração GLM falhou %d vezes — modo cadastro simples', tentativas)
-        return _iniciar_modo_cadastro_simples(occhio, {'nome': nome, 'relacao': relacao, 'avisar': avisar})
-
-    if relacao and not nome:
-        occhio._cadastro_pendente = {'relacao': relacao, 'avisar': avisar, 'tentativas': tentativas}
-        return 'Qual o nome da pessoa?'
-
-    if nome and not relacao:
-        occhio._cadastro_pendente = {'nome': nome, 'avisar': avisar, 'tentativas': tentativas}
-        return f'Qual sua relação com {nome}?'
-
-    occhio._cadastro_pendente = {'avisar': avisar, 'tentativas': tentativas}
-    return 'Qual o nome e sua relação com essa pessoa?'
-
-
-def executar_acao_banco(acao: dict, occhio) -> str:
-    tipo = acao.get('tipo')
-    nome_atual = acao.get('nome_atual', '')
-    novo_valor = acao.get('novo_valor', '')
-
-    store = occhio.face_registry.face_store if occhio.face_registry else None
-    if not store:
-        return 'erro: sem acesso ao banco'
-
-    ok = False
-    if tipo == 'renomear':
-        ok = store.rename_face(nome_atual, novo_valor)
-    elif tipo == 'deletar':
-        ok = store.delete_face(nome_atual)
-    elif tipo == 'atualizar_relacao':
-        ok = store.update_relacao(nome_atual, novo_valor)
-    elif tipo == 'atualizar_aviso':
-        ok = store.update_aviso(
-            nome_atual,
-            str(novo_valor).lower() in ('sim', 'true', '1', 's', 'yes'),
-        )
-    else:
-        return 'erro: tipo de ação desconhecido'
-
-    if ok:
-        recarregar_estado_facial(occhio)
-
-    return 'ok' if ok else 'não encontrado'
-
-
-def _processar_resposta_glm_acao(
-    resposta: str,
-    occhio,
-    pergunta: Optional[str] = None,
-) -> str:
-    """Separa AÇÃO/FALA do GLM, executa escrita no banco e retorna só o texto falado."""
-    texto = (resposta or '').strip()
+def processar_acao_glm(resposta_glm: str, occhio) -> tuple:
+    """
+    Recebe resposta do GLM, separa AÇÃO de FALA, executa no banco.
+    Retorna (fala_para_usuario, status_acao).
+    """
+    texto = (resposta_glm or '').strip()
     if not re.match(r'^A[CÇ]ÃO:', texto, re.IGNORECASE):
-        return _limpar_resposta_fala(texto)
+        return _limpar_resposta_fala(texto), 'sem_acao'
 
     try:
         partes = re.split(r'\n\s*FALA:\s*', texto, maxsplit=1, flags=re.IGNORECASE)
@@ -840,203 +588,217 @@ def _processar_resposta_glm_acao(
                 flags=re.IGNORECASE | re.DOTALL,
             )
             if not match:
-                return _limpar_resposta_fala('Não consegui processar essa solicitação.')
-            acao_json_str, fala = match.group(1).strip(), match.group(2).strip()
+                return _limpar_resposta_fala('Não consegui processar essa solicitação.'), 'erro'
+            json_str, fala = match.group(1).strip(), match.group(2).strip()
         else:
-            acao_json_str = re.sub(r'^A[CÇ]ÃO:\s*', '', partes[0], flags=re.IGNORECASE).strip()
+            json_str = re.sub(r'^A[CÇ]ÃO:\s*', '', partes[0], flags=re.IGNORECASE).strip()
             fala = partes[1].strip()
 
-        acao = json.loads(acao_json_str)
-        if acao.get('tipo') == 'cadastrar' and pergunta:
-            logger.info('📝 GLM sinalizou cadastro — iniciando fluxo via extração')
-            return _limpar_resposta_fala(_processar_fluxo_cadastro(occhio, pergunta))
+        acao = json.loads(json_str)
+        tipo = acao.get('tipo')
+        store = occhio.face_registry.face_store if occhio.face_registry else None
+        if not store:
+            return _limpar_resposta_fala(fala or 'Banco de dados indisponível.'), 'erro'
 
-        resultado = executar_acao_banco(acao, occhio)
-        logger.info('🗄️ Ação banco: %s → %s', acao, resultado)
+        ok = False
+
+        if tipo == 'cadastrar':
+            nome = acao.get('nome', '').strip()
+            relacao = acao.get('relacao', '').strip()
+            avisar = acao.get('avisar', False)
+            if occhio.face_registry:
+                encoding, erro = occhio.face_registry.capturar_encoding_async(occhio)
+                if erro:
+                    return _limpar_resposta_fala(erro), 'erro'
+                if encoding is not None:
+                    with _DLIB_LOCK:
+                        if store.face_exists(encoding):
+                            existente = store.find_existing_name(encoding)
+                            if existente:
+                                return _limpar_resposta_fala(
+                                    fala or f'{existente} já está cadastrado.'
+                                ), 'erro'
+                            return _limpar_resposta_fala(
+                                fala or 'Essa pessoa já parece estar cadastrada.'
+                            ), 'erro'
+                    ok = store.save_face(
+                        face_encoding=encoding,
+                        nome=nome,
+                        relacao=relacao,
+                        label=nome,
+                        avisar=bool(avisar),
+                    )
+                elif not fala:
+                    fala = 'Não encontrei um rosto na câmera. Pode se aproximar?'
+        elif tipo == 'renomear':
+            ok = store.rename_face(acao.get('nome_atual', ''), acao.get('novo_valor', ''))
+        elif tipo == 'atualizar_relacao':
+            ok = store.update_relacao(acao.get('nome_atual', ''), acao.get('novo_valor', ''))
+        elif tipo == 'atualizar_aviso':
+            ok = store.update_aviso(
+                acao.get('nome_atual', ''),
+                str(acao.get('novo_valor', '')).lower() in ('sim', 'true', '1', 's', 'yes'),
+            )
+        elif tipo == 'deletar':
+            ok = store.delete_face(acao.get('nome_atual', ''))
+        else:
+            logger.warning('⚠️ Tipo de ação desconhecido: %s', tipo)
+            return _limpar_resposta_fala(fala or 'Não consegui processar essa solicitação.'), 'erro'
+
+        if ok:
+            recarregar_estado_facial(occhio)
+            logger.info('🗄️ Ação executada: %s → ok', tipo)
+        else:
+            logger.warning('⚠️ Ação %s retornou False', tipo)
 
         if fala:
-            return _limpar_resposta_fala(fala)
-        if resultado == 'ok':
-            return 'Pronto, alteração feita.'
-        if resultado == 'não encontrado':
-            return 'Não encontrei essa pessoa no cadastro.'
-        return 'Não consegui fazer essa alteração agora.'
+            return _limpar_resposta_fala(fala), tipo if ok else 'erro'
+        if ok:
+            return 'Pronto, alteração feita.', tipo
+        return 'Não encontrei essa pessoa no cadastro.', 'erro'
+
     except Exception as e:
-        logger.error('Erro ao processar ação GLM: %s', e)
+        logger.error('❌ Erro ao processar ação GLM: %s | resposta: %s', e, resposta_glm)
         if re.search(r'FALA:\s*', texto, re.IGNORECASE):
             fala = re.split(r'FALA:\s*', texto, maxsplit=1, flags=re.IGNORECASE)[-1].strip()
             if fala:
-                return _limpar_resposta_fala(fala)
-        return _limpar_resposta_fala('Não consegui processar essa solicitação.')
+                return _limpar_resposta_fala(fala), 'erro'
+        return _limpar_resposta_fala('Não consegui processar essa solicitação.'), 'erro'
 
 
 def _montar_system_prompt_voz(
     deteccoes: List[Dict],
     rostos: List[Dict],
     catalogo: Optional[Dict[str, dict]] = None,
+    historico_recente: str = '',
 ) -> str:
     objetos_str = _formatar_objetos_camera(deteccoes)
     rostos_visiveis_str = _formatar_rostos_camera(rostos, catalogo)
     catalogo_str = montar_catalogo_str(catalogo)
-    total_banco = _contar_pessoas_catalogo(catalogo)
-    tem_cadastrados = total_banco > 0
-    tem_rostos_agora = bool(rostos)
 
-    return f"""Você é o Specula, assistente de visão computacional com memória de pessoas.
+    return f"""Você é o Specula, assistente de visão com memória de pessoas.
 Sua resposta será lida em voz alta — máximo 2 frases curtas, português brasileiro, direto ao ponto.
-Nunca mencione porcentagens na resposta. Nunca invente objetos ou pessoas fora do contexto abaixo.
+Nunca mencione porcentagens. Nunca invente objetos ou pessoas fora do contexto abaixo.
 
-## O que a câmera está vendo agora
-{objetos_str if objetos_str else "Nenhum objeto detectado no momento."}
+## Câmera agora
+Objetos: {objetos_str if objetos_str else "Nenhum objeto detectado no momento."}
 
-## Rostos reconhecidos neste momento
-{rostos_visiveis_str if rostos_visiveis_str else "Nenhum rosto reconhecido no frame atual."}
+Rostos reconhecidos: {rostos_visiveis_str if rostos_visiveis_str else "Nenhum rosto reconhecido no frame atual."}
 
-## Pessoas cadastradas no banco
-Total: {total_banco}
-{catalogo_str}
+## Banco de dados
+{catalogo_str if catalogo_str else "Nenhuma pessoa cadastrada."}
 
-IMPORTANTE: Responda APENAS com base nas informações acima.
-Se não há pessoas cadastradas, diga isso claramente.
-Nunca invente nomes, números ou dados que não estejam listados acima.
+## Conversa anterior (contexto)
+{historico_recente}
 
-## Ações que você pode executar quando o usuário pedir
-- Cadastrar uma pessoa nova na câmera
-- Renomear uma pessoa: muda o nome no banco
-- Deletar uma pessoa: remove do banco permanentemente
-- Atualizar relação: muda como a pessoa é classificada (amigo, familiar, colega…)
-- Atualizar aviso: ativa ou desativa o alerta quando a pessoa aparecer na câmera
+## O que você pode fazer
+Você pode executar ações no banco de dados. Quando decidir executar uma ação, responda SEMPRE neste formato exato:
+AÇÃO: {{json da ação}}
+FALA: {{o que dizer ao usuário em voz alta}}
 
-Quando o usuário pedir para cadastrar alguém na câmera, responda SEMPRE neste formato:
-AÇÃO: {{"tipo": "cadastrar", "nome_atual": null, "novo_valor": null}}
-FALA: Vou cadastrar a pessoa na câmera.
+Schemas de ação disponíveis:
 
-Quando o usuário pedir para modificar, renomear, deletar ou atualizar dados de uma pessoa cadastrada, responda SEMPRE neste formato exato:
-AÇÃO: {{"tipo": "renomear" | "deletar" | "atualizar_relacao" | "atualizar_aviso", "nome_atual": "nome no banco", "novo_valor": "novo valor"}}
-FALA: <o que dizer ao usuário em voz alta, confirmando o que foi feito>
+Cadastrar pessoa:
+AÇÃO: {{"tipo": "cadastrar", "nome": "nome", "relacao": "relacao", "avisar": true/false}}
+FALA: confirmação para o usuário
 
-Para qualquer outra pergunta que não envolva modificar o banco ou cadastrar alguém, responda normalmente sem o prefixo AÇÃO.
+Renomear pessoa:
+AÇÃO: {{"tipo": "renomear", "nome_atual": "nome", "novo_valor": "novo nome"}}
+FALA: confirmação
 
-## Estado do sistema
-- Pessoas cadastradas: {"sim" if tem_cadastrados else "não"} ({total_banco} no banco)
-- Rostos visíveis agora: {"sim" if tem_rostos_agora else "não"}
+Atualizar relação:
+AÇÃO: {{"tipo": "atualizar_relacao", "nome_atual": "nome", "novo_valor": "nova relação"}}
+FALA: confirmação
 
-Responda de forma natural e direta. Use o contexto completo acima para entender o que o usuário quer saber — seja sobre o que está na câmera agora, sobre quem você conhece no banco, ou sobre qualquer combinação disso. Quando executar uma ação, confirme o que foi feito na resposta falada (campo FALA)."""
+Atualizar aviso:
+AÇÃO: {{"tipo": "atualizar_aviso", "nome_atual": "nome", "novo_valor": "sim" ou "nao"}}
+FALA: confirmação
+
+Deletar pessoa:
+AÇÃO: {{"tipo": "deletar", "nome_atual": "nome"}}
+FALA: confirmação
+
+Para qualquer outra resposta que não envolva ação no banco, responda normalmente sem o prefixo AÇÃO.
+
+## Regras importantes
+- Se o usuário pedir para cadastrar e não mencionou nome ou relação, pergunte — mas NÃO use o formato AÇÃO ainda, apenas faça a pergunta no texto normal. Só use AÇÃO quando tiver nome E relação.
+- Se o usuário está respondendo uma pergunta sua anterior (ex: você perguntou o nome e ele respondeu), use o contexto da conversa para completar a ação.
+- Nunca invente dados. Use apenas o que o usuário disse.
+- Responda sempre em português brasileiro, de forma curta e natural."""
 
 
 def gerar_resposta_voz(
     pergunta: str,
     deteccoes: List[Dict],
     rostos: List[Dict],
-    memoria: Optional[ConversationMemory] = None,
     catalogo: Optional[Dict[str, dict]] = None,
-    face_registry: Optional[FaceRegistry] = None,
+    historico_conversa: Optional[List[dict]] = None,
     occhio=None,
-) -> tuple:
-    """
-    Pipeline principal de geração de resposta.
-    Retorna (resposta, sugestao_cadastro_pendente).
-    """
-
-    def _gravar(resposta: str, sug: bool = False) -> tuple:
-        if memoria and resposta:
-            memoria.adicionar_turno(pergunta, resposta, deteccoes, rostos)
-        return _limpar_resposta_fala(resposta), sug
+) -> str:
+    """Pipeline principal de geração de resposta via GLM."""
 
     pergunta = (pergunta or '').strip()
     if not pergunta:
-        return _gravar('Não consegui entender sua pergunta.')
-
-    intencao, termos_excluidos = IntencaoPergunta.classificar(pergunta)
+        return 'Não consegui entender sua pergunta.'
 
     instancia = occhio or get_occhio_instance()
-    if intencao == IntencaoPergunta.IDENTIFICACAO and face_registry:
-        sugestao = face_registry.sugerir_cadastro_se_desconhecido(rostos, instancia)
-        if sugestao:
-            return _gravar(sugestao, sug=True)
+    historico = list(historico_conversa or [])
+    historico_recente = _formatar_historico_recente(historico)
 
     if not glm_disponivel():
+        intencao, _ = IntencaoPergunta.classificar(pergunta)
         resp = _responder_perigo(pergunta, deteccoes)
         if resp:
-            return _gravar(resp)
-        resp = _responder_posicao(pergunta, deteccoes, memoria)
+            return resp
+        resp = _responder_posicao(pergunta, deteccoes, None)
         if resp:
-            return _gravar(resp)
+            return resp
         resposta_direta = _resposta_direta(intencao, pergunta, rostos, catalogo)
         if resposta_direta:
-            return _gravar(resposta_direta)
-        if (
-            not deteccoes and not rostos and not catalogo
-            and intencao in (
-                IntencaoPergunta.CENA_GERAL, IntencaoPergunta.CENA_EXCLUSAO, IntencaoPergunta.DESCRICAO,
-            )
-        ):
-            return _gravar(random.choice(FALLBACKS_SEM_DETECCOES))
-        return _gravar(random.choice(FALLBACKS_SEM_IA))
+            return resposta_direta
+        if not deteccoes and not rostos and not catalogo:
+            return random.choice(FALLBACKS_SEM_DETECCOES)
+        return random.choice(FALLBACKS_SEM_IA)
 
-    instrucao_extra = ''
-    if intencao == IntencaoPergunta.CENA_EXCLUSAO and termos_excluidos:
-        excluidos_fmt = ', '.join(termos_excluidos)
-        instrucao_extra = (
-            f'O usuário já sabe sobre "{excluidos_fmt}". '
-            f'Não mencione isso na resposta.\n'
-        )
-    if memoria and memoria.objetos_recentes():
-        objs = ', '.join(memoria.objetos_recentes())
-        instrucao_extra += f'Objetos mencionados recentemente na conversa: {objs}.\n'
-
-    system_prompt = _montar_system_prompt_voz(deteccoes, rostos, catalogo)
-    historico = memoria.contexto_para_glm() if memoria else []
-
-    user_content = (
-        f'Pergunta do usuário: "{pergunta}"\n\n'
-        f'{instrucao_extra}'
-        'Responda de forma direta e natural em português brasileiro, '
-        'usando o contexto do sistema para decidir o que é relevante. '
-        'Não repita a pergunta na resposta.'
+    system_prompt = _montar_system_prompt_voz(
+        deteccoes, rostos, catalogo, historico_recente=historico_recente,
     )
+    mensagens_glm = [{'role': 'system', 'content': system_prompt}]
+    mensagens_glm.extend(historico[-6:])
 
     logger.info(
-        '🎤 GLM — pergunta: "%s" | objetos: %d | rostos: %d | cadastrados: %d',
+        '🎤 GLM — pergunta: "%s" | objetos: %d | rostos: %d | histórico: %d',
         pergunta,
         len(deteccoes),
         len(rostos),
-        len(catalogo) if catalogo else 0,
+        len(historico),
     )
 
-    resposta = glm_chat(
-        messages=[
-            {'role': 'system', 'content': system_prompt},
-            *historico,
-            {'role': 'user', 'content': user_content},
-        ],
-        max_tokens=200,
+    resposta_glm = glm_chat(
+        messages=mensagens_glm,
+        max_tokens=250,
         temperature=0.4,
     )
 
-    resposta = _processar_resposta_glm_acao(resposta, instancia, pergunta=pergunta)
-
-    if memoria:
-        memoria.adicionar_turno(pergunta, resposta, deteccoes, rostos)
-
-    return resposta, False
+    fala, status = processar_acao_glm(resposta_glm, instancia)
+    logger.info('🎤 GLM resposta → status: %s', status)
+    return fala
 
 
 def _montar_resposta_voz(
     transcricao: str,
     resposta: str,
-    cadastro_ativo: bool = False,
 ) -> dict:
     return {
         'transcricao': transcricao,
         'resposta': _limpar_resposta_fala(resposta),
         'audio_b64': None,
-        'cadastro_ativo': cadastro_ativo,
+        'cadastro_ativo': False,
     }
 
 
-def _finalizar_resposta_voz(transcricao: str, resposta: str, cadastro_ativo: bool = False) -> dict:
-    resultado = _montar_resposta_voz(transcricao, resposta, cadastro_ativo)
+def _finalizar_resposta_voz(transcricao: str, resposta: str) -> dict:
+    resultado = _montar_resposta_voz(transcricao, resposta)
     audio_erro = None
     try:
         audio_mp3 = sintetizar_voz(resultado['resposta'])
@@ -1078,10 +840,6 @@ class OcchioCloud:
             self._encoding_lock = threading.Lock()
             self._encoding_result = None
             self._encoding_erro = None
-            self._cadastro_pendente = None
-            self._cadastro_lock = threading.Lock()
-            self._aguardando_nome_simples = False
-            self._aguardando_relacao_simples = False
 
             self._inicializar_yolo()
             self._inicializar_faces()
@@ -1160,10 +918,6 @@ class OcchioCloud:
         self._encoding_lock = threading.Lock()
         self._encoding_result = None
         self._encoding_erro = None
-        self._cadastro_pendente = None
-        self._cadastro_lock = threading.Lock()
-        self._aguardando_nome_simples = False
-        self._aguardando_relacao_simples = False
         logger.warning("⚠️ Sistema em modo emergência")
 
     def _decodificar_imagem(self, dados_imagem: str) -> np.ndarray:
@@ -1490,7 +1244,6 @@ def processar_pergunta_voz(
     deteccoes_atuais: list,
     rostos_atuais: list,
     frame_b64: Optional[str] = None,
-    memoria: Optional[ConversationMemory] = None,
     stream_state: Optional['_StreamState'] = None,
 ) -> dict:
     audio_bytes = base64.b64decode(audio_b64)
@@ -1545,74 +1298,45 @@ def processar_pergunta_voz(
                     if removido else
                     'Não encontrei ninguém com esse nome cadastrado.'
                 )
-                if memoria:
-                    memoria.adicionar_turno(transcricao_atual, msg, deteccoes_atuais, rostos_atuais)
+                with stream_state.lock:
+                    stream_state.historico_conversa.append({'role': 'user', 'content': transcricao_atual})
+                    stream_state.historico_conversa.append({'role': 'assistant', 'content': msg})
                 return _finalizar_resposta_voz(transcricao_atual, msg)
             if _eh_negacao(transcricao_atual):
                 stream_state.remocao_pendente = None
                 return _finalizar_resposta_voz(transcricao_atual, 'Ok, mantive o cadastro.')
             stream_state.remocao_pendente = None
 
-        # ── Cadastro pendente ou modo simples — completa antes do GLM normal ─
-        if _cadastro_ativo(occhio) and occhio.face_registry:
-            with occhio._cadastro_lock:
-                resposta = _processar_fluxo_cadastro(occhio, transcricao_atual)
-            cadastro_ativo = _cadastro_ativo(occhio)
-            if memoria:
-                memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
-            return _finalizar_resposta_voz(transcricao_atual, resposta, cadastro_ativo)
-
         # ── Nova intenção de remoção ────────────────────────────────────
         nome_remover = _detectar_intencao_remocao(transcricao_atual)
-        if nome_remover and stream_state and not _cadastro_ativo(occhio):
+        if nome_remover and stream_state:
             stream_state.remocao_pendente = nome_remover
             msg = f'Tem certeza que quer que eu esqueça {nome_remover}?'
-            if memoria:
-                memoria.adicionar_turno(transcricao_atual, msg, deteccoes_atuais, rostos_atuais)
+            with stream_state.lock:
+                stream_state.historico_conversa.append({'role': 'user', 'content': transcricao_atual})
+                stream_state.historico_conversa.append({'role': 'assistant', 'content': msg})
             return _finalizar_resposta_voz(transcricao_atual, msg)
 
-        # ── Confirmação de cadastro sugerido ─────────────────────────────
-        if stream_state and stream_state.sugestao_cadastro_pendente and occhio.face_registry:
-            if _eh_confirmacao(transcricao_atual):
-                stream_state.sugestao_cadastro_pendente = False
-                with occhio._cadastro_lock:
-                    resposta = _processar_fluxo_cadastro(occhio, transcricao_atual)
-                cadastro_ativo = _cadastro_ativo(occhio)
-                if memoria:
-                    memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
-                return _finalizar_resposta_voz(transcricao_atual, resposta, cadastro_ativo)
-            if _eh_negacao(transcricao_atual):
-                stream_state.sugestao_cadastro_pendente = False
-                return _finalizar_resposta_voz(transcricao_atual, 'Ok, sem problemas.')
-            stream_state.sugestao_cadastro_pendente = False
+        # ── GLM — uma única chamada com contexto completo ───────────────
+        catalogo = occhio.face_registry.get_catalogo() if occhio.face_registry else None
 
-        # ── Intenção explícita de cadastro ───────────────────────────────
-        if occhio.face_registry and detectar_intencao_cadastro(transcricao_atual):
-            with occhio._cadastro_lock:
-                resposta = _processar_fluxo_cadastro(occhio, transcricao_atual)
-            cadastro_ativo = _cadastro_ativo(occhio)
-            if memoria:
-                memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
-            return _finalizar_resposta_voz(transcricao_atual, resposta, cadastro_ativo)
+        with stream_state.lock:
+            stream_state.historico_conversa.append({'role': 'user', 'content': transcricao_atual})
+            historico = list(stream_state.historico_conversa)
 
-        # ── Resposta principal (GLM + memória) ────────────────────────────
-        catalogo = None
-        if occhio.face_registry:
-            catalogo = occhio.face_registry.get_catalogo()
-        resposta, sugestao = gerar_resposta_voz(
+        resposta = gerar_resposta_voz(
             transcricao_atual,
             deteccoes_atuais,
             rostos_atuais,
-            memoria=memoria,
             catalogo=catalogo,
-            face_registry=occhio.face_registry,
+            historico_conversa=historico,
             occhio=occhio,
         )
-        if stream_state and sugestao:
-            stream_state.sugestao_cadastro_pendente = True
 
-        cadastro_ativo = _cadastro_ativo(occhio)
-        return _finalizar_resposta_voz(transcricao_atual, resposta, cadastro_ativo)
+        with stream_state.lock:
+            stream_state.historico_conversa.append({'role': 'assistant', 'content': resposta})
+
+        return _finalizar_resposta_voz(transcricao_atual, resposta)
 
     except Exception as e:
         logger.error(f'❌ Erro no pipeline de voz: {e}')
@@ -1622,11 +1346,9 @@ def processar_pergunta_voz(
             )
         except Exception:
             pass
-        occhio_err = occhio if 'occhio' in locals() and occhio else get_occhio_instance()
         return _finalizar_resposta_voz(
             transcricao_atual,
             'Ocorreu um erro interno. Pode repetir?',
-            _cadastro_ativo(occhio_err),
         )
 
 
@@ -1639,9 +1361,8 @@ class _StreamState:
         self.rostos_atuais: List[Dict] = []
         self.ultimo_frame_b64: Optional[str] = None
         self.voz_ocupada: bool = False
-        self.memoria = ConversationMemory()
+        self.historico_conversa: List[dict] = []
         self.remocao_pendente: Optional[str] = None
-        self.sugestao_cadastro_pendente: bool = False
 
     def atualizar(self, frame_b64: str, deteccoes: list, rostos: list) -> None:
         with self.lock:
@@ -1678,7 +1399,6 @@ def _executar_voz_background(
             deteccoes,
             rostos,
             frame_b64=frame_b64,
-            memoria=stream_state.memoria,
             stream_state=stream_state,
         )
         try:
@@ -1698,7 +1418,7 @@ def _executar_voz_background(
                 'transcricao': '',
                 'resposta': 'Ocorreu um erro ao processar sua pergunta.',
                 'audio_b64': None,
-                'cadastro_ativo': _cadastro_ativo(get_occhio_instance()),
+                'cadastro_ativo': False,
             }))
         except Exception:
             logger.warning('Não foi possível enviar erro de voz — cliente desconectado')
