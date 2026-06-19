@@ -15,17 +15,21 @@ PALAVRAS_CADASTRO = (
     'cadastrar', 'registrar', 'adicionar', 'salvar', 'gravar',
     'conhecer', 'memorizar', 'lembrar', 'anotar',
 )
-PALAVRAS_SIM = (
-    'sim', 'si', 's', 'quero', 'pode', 'claro', 'por favor', 'com certeza',
-    'positivo', 'ok', 'okay', 'isso', 'isso mesmo', 'exato', 'certo', 'confirmo',
-    'pode avisar', 'quero sim', 'com certeza sim', 'uhum', 'aham', 'hum hum',
+CONFIRMACOES = (
+    'sim', 's', 'pode', 'pode ser', 'quero', 'vai', 'claro',
+    'beleza', 'tá', 'ta', 'ok', 'isso', 'isso mesmo', 'exato',
+    'por favor', 'pfv', 'pf', 'vamo', 'vamos',
+    'si', 'com certeza', 'positivo', 'confirmo', 'uhum', 'aham',
 )
-PALAVRAS_NAO = (
-    'não', 'nao', 'n', 'negativo', 'deixa', 'dispensa', 'sem aviso', 'não quero',
-    'nao quero', 'de jeito nenhum', 'nem', 'nunca', 'prefiro não', 'prefiro nao',
-    'não precisa', 'nao precisa', 'tá bom', 'ta bom', 'está bom', 'esta bom',
+NEGACOES = (
+    'não', 'nao', 'n', 'negativo', 'deixa', 'deixa pra la',
+    'esquece', 'tanto faz', 'sem querer', 'não quero', 'nao quero',
+    'cancela', 'dispensa', 'sem aviso', 'de jeito nenhum',
 )
+PALAVRAS_SIM = CONFIRMACOES
+PALAVRAS_NAO = NEGACOES
 RESPOSTAS_SIM_CURTAS = frozenset({'s', 'si', 'sim', 'n', 'nao', 'não'})
+CADASTRO_TIMEOUT = 20.0
 
 
 @dataclass
@@ -177,6 +181,11 @@ class FaceRegistry:
         if not texto:
             return None
 
+        if sessao.em_andamento() and sessao.iniciado_em:
+            if time.time() - sessao.iniciado_em > CADASTRO_TIMEOUT:
+                sessao.reset()
+                return None
+
         if sessao.estado == 'idle':
             if not detectar_intencao_cadastro(texto):
                 return None
@@ -256,8 +265,58 @@ class FaceRegistry:
 
         self.recarregar_rostos()
         if avisar:
-            return f'Pronto! {nome} cadastrado. Vou avisar quando aparecer.'
-        return f'Pronto! {nome} cadastrado, sem avisos.'
+            return f'Pronto, vou lembrar de {nome} quando aparecer.'
+        return f'Pronto, {nome} cadastrado.'
+
+    def sugerir_cadastro_se_desconhecido(
+        self, rostos: list, cadastro_sessao: CadastroSessao
+    ) -> Optional[str]:
+        """Sugere cadastro quando há rosto desconhecido e nenhum cadastro em andamento."""
+        desconhecidos = [r for r in rostos if not r.get('conhecido')]
+        if not desconhecidos or cadastro_sessao.em_andamento():
+            return None
+        return 'Não reconheço esse rosto. Quer que eu aprenda quem é?'
+
+    def iniciar_cadastro_confirmado(
+        self, sessao: CadastroSessao, frame=None
+    ) -> Optional[str]:
+        """Inicia cadastro após o usuário confirmar a sugestão."""
+        if frame is None:
+            return 'Preciso da câmera ativa para aprender o rosto.'
+        encoding, erro = self.capturar_encoding(frame)
+        if erro:
+            return erro
+        if self.face_store and self.face_store.face_exists(encoding):
+            existente = None
+            if hasattr(self.face_store, 'find_existing_name'):
+                existente = self.face_store.find_existing_name(encoding)
+            if existente:
+                return f'{existente} já está cadastrado.'
+            return 'Essa pessoa já parece estar cadastrada.'
+        sessao.encoding = encoding
+        sessao.estado = 'aguardando_nome'
+        sessao.iniciado_em = time.time()
+        return 'Qual o nome dessa pessoa?'
+
+    def remover_por_nome(self, nome: str) -> bool:
+        """Remove rosto pelo nome (case-insensitive, busca parcial)."""
+        if not self.face_store or not hasattr(self.face_store, 'list_faces'):
+            return False
+        nome_busca = nome.strip().lower().rstrip('?.!')
+        if not nome_busca:
+            return False
+        faces = self.face_store.list_faces()
+        removidos = 0
+        for face in faces:
+            fn = face.get('nome', '').lower()
+            if nome_busca in fn or fn in nome_busca:
+                if hasattr(self.face_store, 'delete_face'):
+                    if self.face_store.delete_face(face['id']):
+                        removidos += 1
+        if removidos:
+            self.recarregar_rostos()
+            return True
+        return False
 
     def cancelar(self, sessao: CadastroSessao) -> str:
         if sessao.em_andamento():
