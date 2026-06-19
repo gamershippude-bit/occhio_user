@@ -157,9 +157,36 @@ class FaceRegistry:
             return 0
         return self.face_detector.contar_rostos(frame)
 
-    def capturar_encoding(self, frame) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    def capturar_encoding_do_frame_atual(self, occhio, timeout: float = 5.0) -> Tuple[Optional[np.ndarray], Optional[str]]:
+        """Solicita captura de encoding via loop de stream (evita dlib na thread de voz)."""
+        if not occhio or not hasattr(occhio, '_encoding_request'):
+            return None, 'Captura de rosto indisponível no momento.'
+
+        with occhio._encoding_lock:
+            occhio._encoding_result = None
+            occhio._encoding_erro = None
+        occhio._encoding_request.set()
+
+        inicio = time.time()
+        while time.time() - inicio < timeout:
+            with occhio._encoding_lock:
+                if occhio._encoding_result is not None:
+                    return occhio._encoding_result, None
+                if occhio._encoding_erro is not None:
+                    return None, occhio._encoding_erro
+            time.sleep(0.05)
+
+        occhio._encoding_request.clear()
+        return None, 'Timeout ao capturar rosto da câmera. Tente novamente.'
+
+    def capturar_encoding(self, frame=None, occhio=None) -> Tuple[Optional[np.ndarray], Optional[str]]:
+        if occhio is not None:
+            return self.capturar_encoding_do_frame_atual(occhio)
+
         if not self.face_detector:
             return None, 'Detector facial não disponível.'
+        if frame is None:
+            return None, 'Preciso da imagem da câmera para cadastrar. Mantenha a câmera ativa e tente de novo.'
         if not hasattr(self.face_detector, 'extrair_encoding_principal'):
             return None, 'Detector facial incompleto.'
 
@@ -177,7 +204,7 @@ class FaceRegistry:
             return None, msg or 'Não encontrei um rosto claro na câmera. Posicione a pessoa de frente e tente de novo.'
         return encoding, None
 
-    def processar_mensagem(self, sessao: CadastroSessao, texto: str, frame=None) -> Optional[str]:
+    def processar_mensagem(self, sessao: CadastroSessao, texto: str, frame=None, occhio=None) -> Optional[str]:
         texto = (texto or '').strip()
         if not texto:
             return None
@@ -195,9 +222,7 @@ class FaceRegistry:
         if sessao.estado == 'idle':
             if not detectar_intencao_cadastro(texto):
                 return None
-            if frame is None:
-                return 'Preciso da imagem da câmera para cadastrar. Mantenha a câmera ativa e tente de novo.'
-            encoding, erro = self.capturar_encoding(frame)
+            encoding, erro = self.capturar_encoding(frame=frame, occhio=occhio)
             if erro:
                 return erro
             if self.face_store and self.face_store.face_exists(encoding):
@@ -284,12 +309,10 @@ class FaceRegistry:
         return 'Não reconheço esse rosto. Quer que eu aprenda quem é?'
 
     def iniciar_cadastro_confirmado(
-        self, sessao: CadastroSessao, frame=None
+        self, sessao: CadastroSessao, frame=None, occhio=None
     ) -> Optional[str]:
         """Inicia cadastro após o usuário confirmar a sugestão."""
-        if frame is None:
-            return 'Preciso da câmera ativa para aprender o rosto.'
-        encoding, erro = self.capturar_encoding(frame)
+        encoding, erro = self.capturar_encoding(frame=frame, occhio=occhio)
         if erro:
             return erro
         if self.face_store and self.face_store.face_exists(encoding):

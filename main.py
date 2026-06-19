@@ -534,16 +534,35 @@ def _formatar_catalogo_banco(catalogo: Optional[Dict[str, dict]]) -> str:
     return ", ".join(nomes_relacoes) if nomes_relacoes else ""
 
 
-def _formatar_catalogo_detalhado(catalogo: Optional[Dict[str, dict]]) -> str:
+def montar_catalogo_str(catalogo) -> str:
+    """Serializa o catálogo de forma segura para o prompt do GLM."""
     if not catalogo:
-        return "Nenhuma pessoa cadastrada."
-    linhas = []
-    for v in catalogo.values():
-        nome = v.get('nome', '?')
-        relacao = v.get('relacao', 'sem relação')
-        avisar = 'sim' if v.get('avisar') else 'não'
-        linhas.append(f'- {nome} | relação: {relacao} | avisar: {avisar}')
-    return '\n'.join(linhas) if linhas else 'Nenhuma pessoa cadastrada.'
+        return 'Nenhuma pessoa cadastrada.'
+
+    try:
+        linhas = []
+        for v in catalogo.values():
+            nome = str(v.get('nome', '')).strip()
+            relacao = str(v.get('relacao', 'não definida')).strip()
+            avisar = 'sim' if v.get('avisar') else 'não'
+
+            if nome:
+                linhas.append(f'- {nome} | relação: {relacao} | avisar quando aparecer: {avisar}')
+
+        if not linhas:
+            return 'Nenhuma pessoa cadastrada.'
+
+        return '\n'.join(linhas)
+
+    except Exception as e:
+        logger.error(f'❌ Erro ao serializar catálogo: {e} | catalogo type: {type(catalogo)}')
+        return 'Erro ao carregar lista de pessoas cadastradas.'
+
+
+def _contar_pessoas_catalogo(catalogo) -> int:
+    if not catalogo:
+        return 0
+    return sum(1 for v in catalogo.values() if str(v.get('nome', '')).strip())
 
 
 def executar_acao_banco(acao: dict, occhio, cadastro_sessao: Optional[CadastroSessao] = None) -> str:
@@ -628,8 +647,8 @@ def _montar_system_prompt_voz(
 ) -> str:
     objetos_str = _formatar_objetos_camera(deteccoes)
     rostos_visiveis_str = _formatar_rostos_camera(rostos, catalogo)
-    catalogo_detalhado = _formatar_catalogo_detalhado(catalogo)
-    total_banco = len(catalogo) if catalogo else 0
+    catalogo_str = montar_catalogo_str(catalogo)
+    total_banco = _contar_pessoas_catalogo(catalogo)
     tem_cadastrados = total_banco > 0
     tem_rostos_agora = bool(rostos)
 
@@ -645,7 +664,11 @@ Nunca mencione porcentagens na resposta. Nunca invente objetos ou pessoas fora d
 
 ## Pessoas cadastradas no banco
 Total: {total_banco}
-{catalogo_detalhado}
+{catalogo_str}
+
+IMPORTANTE: Responda APENAS com base nas informações acima.
+Se não há pessoas cadastradas, diga isso claramente.
+Nunca invente nomes, números ou dados que não estejam listados acima.
 
 ## Ações que você pode executar quando o usuário pedir
 - Renomear uma pessoa: muda o nome no banco
@@ -817,6 +840,10 @@ class OcchioCloud:
             self.detector_faces = None
             self.face_store = None
             self.face_registry = None
+            self._encoding_request = threading.Event()
+            self._encoding_lock = threading.Lock()
+            self._encoding_result = None
+            self._encoding_erro = None
 
             self._inicializar_yolo()
             self._inicializar_faces()
@@ -891,6 +918,10 @@ class OcchioCloud:
         self.interpreter = self._criar_interpreter_local()
         self.glm_disponivel = False
         self.whisper_disponivel = False
+        self._encoding_request = threading.Event()
+        self._encoding_lock = threading.Lock()
+        self._encoding_result = None
+        self._encoding_erro = None
         logger.warning("⚠️ Sistema em modo emergência")
 
     def _decodificar_imagem(self, dados_imagem: str) -> np.ndarray:
@@ -1095,6 +1126,18 @@ class OcchioCloud:
                 escala = 640 / largura
                 frame = cv2.resize(frame, (640, int(altura * escala)), interpolation=cv2.INTER_AREA)
                 altura, largura = frame.shape[:2]
+
+            if self._encoding_request.is_set() and self.detector_faces:
+                encoding, erro = self.detector_faces.extrair_encoding_principal(frame)
+                with self._encoding_lock:
+                    if encoding is not None:
+                        self._encoding_result = encoding
+                        self._encoding_erro = None
+                    else:
+                        self._encoding_result = None
+                        self._encoding_erro = erro or 'Não encontrei rosto claro na câmera.'
+                self._encoding_request.clear()
+
             deteccoes = []
             if self.detector_objetos and hasattr(self.detector_objetos, 'detectar_com_bbox'):
                 brutas = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=confidence_threshold)
@@ -1293,9 +1336,9 @@ def processar_pergunta_voz(
                 stream_state.sugestao_cadastro_pendente = False
                 lock = cadastro_lock or threading.Lock()
                 with lock:
-                    resposta = occhio.face_registry.iniciar_cadastro_confirmado(
-                        cadastro_sessao, frame=frame
-                    )
+                resposta = occhio.face_registry.iniciar_cadastro_confirmado(
+                    cadastro_sessao, frame=frame, occhio=occhio
+                )
                     cadastro_ativo = cadastro_sessao.em_andamento() if cadastro_sessao else False
                 if resposta and memoria:
                     memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
@@ -1314,7 +1357,7 @@ def processar_pergunta_voz(
             lock = cadastro_lock or threading.Lock()
             with lock:
                 resposta_cadastro = occhio.face_registry.processar_mensagem(
-                    cadastro_sessao, transcricao_atual, frame=frame
+                    cadastro_sessao, transcricao_atual, frame=frame, occhio=occhio
                 )
                 if resposta_cadastro:
                     resposta = resposta_cadastro

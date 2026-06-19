@@ -2,10 +2,13 @@ import face_recognition
 import cv2
 import logging
 import numpy as np
+import threading
 from collections import Counter
 import time
 
 logger = logging.getLogger(__name__)
+
+_DLIB_LOCK = threading.Lock()
 
 class FaceDetector:
     def __init__(self, tolerance=0.5):
@@ -20,26 +23,27 @@ class FaceDetector:
 
     def carregar_encodings(self, encodings, names):
         """Carrega encodings conhecidos — um encoding por nome (evita duplicatas do banco)."""
-        self.known_face_encodings = []
-        self.known_face_names = []
-        vistos = set()
+        with _DLIB_LOCK:
+            self.known_face_encodings = []
+            self.known_face_names = []
+            vistos = set()
 
-        for encoding, name in zip(encodings, names):
-            if (encoding is None or len(encoding) != 128):
-                continue
-            nome = name.strip()
-            if nome.lower() in ('desconhecido', 'unknown', ''):
-                continue
-            chave = nome.lower()
-            if chave in vistos:
-                continue
-            vistos.add(chave)
-            self.known_face_encodings.append(encoding)
-            self.known_face_names.append(nome)
+            for encoding, name in zip(encodings, names):
+                if (encoding is None or len(encoding) != 128):
+                    continue
+                nome = name.strip()
+                if nome.lower() in ('desconhecido', 'unknown', ''):
+                    continue
+                chave = nome.lower()
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                self.known_face_encodings.append(encoding)
+                self.known_face_names.append(nome)
 
-        logger.info(f"Carregados {len(self.known_face_encodings)} rosto(s) único(s).")
-        if self.known_face_names:
-            logger.info(f"Nomes cadastrados: {self.known_face_names}")
+            logger.info(f"Carregados {len(self.known_face_encodings)} rosto(s) único(s).")
+            if self.known_face_names:
+                logger.info(f"Nomes cadastrados: {self.known_face_names}")
 
     def detectar_faces(self, frame):
         """
@@ -47,68 +51,49 @@ class FaceDetector:
         Retorna: (frame_com_rostos, count, locations, names)
         """
         try:
-            # Converter BGR para RGB
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Encontrar todas as faces no frame
-            face_locations = face_recognition.face_locations(rgb_frame, model="hog")
-            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-            
-            face_names = []
-            frame_com_rostos = frame.copy()
-            
-            # Se não há faces, retornar vazio
-            if not face_locations:
-                return frame_com_rostos, 0, [], []
-            
-            # Processar cada face encontrada
-            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                name = "Desconhecido"
-                confidence = 0.0
+            with _DLIB_LOCK:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
                 
-                if self.known_face_encodings:
-                    # Calcular distâncias para todas as faces conhecidas
-                    face_distances = face_recognition.face_distance(
-                        self.known_face_encodings, 
-                        face_encoding
-                    )
+                face_names = []
+                frame_com_rostos = frame.copy()
+                
+                if not face_locations:
+                    return frame_com_rostos, 0, [], []
+                
+                for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                    name = "Desconhecido"
+                    confidence = 0.0
                     
-                    # Encontrar a melhor correspondência
-                    best_match_index = np.argmin(face_distances)
-                    best_distance = face_distances[best_match_index]
+                    if self.known_face_encodings:
+                        face_distances = face_recognition.face_distance(
+                            self.known_face_encodings, 
+                            face_encoding
+                        )
+                        best_match_index = np.argmin(face_distances)
+                        best_distance = face_distances[best_match_index]
+                        confidence = max(0, 1 - best_distance)
+                        
+                        if best_distance <= self.tolerance and confidence >= self.min_confidence:
+                            name = self.known_face_names[best_match_index]
                     
-                    # Converter distância em confiança (0-1)
-                    confidence = max(0, 1 - best_distance)
+                    face_names.append(name)
                     
-                    # Só considerar reconhecido se estiver dentro da tolerância E com confiança mínima
-                    if best_distance <= self.tolerance and confidence >= self.min_confidence:
-                        name = self.known_face_names[best_match_index]
-                        # ✅ LOG OTIMIZADO: Removido log debug para cada reconhecimento
-            
-                face_names.append(name)
+                    if name != "Desconhecido":
+                        cor = (0, 255, 0)
+                        texto = f"{name} ({confidence:.0%})"
+                    else:
+                        cor = (0, 0, 255)
+                        texto = "Desconhecido"
+                    
+                    cv2.rectangle(frame_com_rostos, (left, top), (right, bottom), cor, 2)
+                    cv2.rectangle(frame_com_rostos, (left, bottom - 35), (right, bottom), cor, cv2.FILLED)
+                    cv2.putText(frame_com_rostos, texto, (left + 6, bottom - 6), 
+                               cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
                 
-                # Desenhar caixa e nome com cores diferentes
-                if name != "Desconhecido":
-                    # Conhecido - Verde
-                    cor = (0, 255, 0)
-                    texto = f"{name} ({confidence:.0%})"
-                else:
-                    # Desconhecido - Vermelho
-                    cor = (0, 0, 255)
-                    texto = "Desconhecido"
-                
-                # Caixa ao redor do rosto
-                cv2.rectangle(frame_com_rostos, (left, top), (right, bottom), cor, 2)
-                
-                # Rótulo com nome
-                cv2.rectangle(frame_com_rostos, (left, bottom - 35), (right, bottom), cor, cv2.FILLED)
-                cv2.putText(frame_com_rostos, texto, (left + 6, bottom - 6), 
-                           cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
-            
-            # ✅ LOG OTIMIZADO: Análise apenas a cada 5 segundos
-            self._analisar_resultados_otimizado(face_names)
-            
-            return frame_com_rostos, len(face_names), face_locations, face_names
+                self._analisar_resultados_otimizado(face_names)
+                return frame_com_rostos, len(face_names), face_locations, face_names
             
         except Exception as e:
             # ✅ LOG OTIMIZADO: Erros apenas a cada 5 segundos
@@ -166,34 +151,33 @@ class FaceDetector:
         Retorna: lista de nomes das pessoas detectadas
         """
         try:
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            face_locations = face_recognition.face_locations(rgb_frame, model="hog")
-            
-            if not face_locations:
-                return []
-            
-            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-            face_names = []
-            
-            for face_encoding in face_encodings:
-                name = "Desconhecido"
+            with _DLIB_LOCK:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                face_locations = face_recognition.face_locations(rgb_frame, model="hog")
                 
-                if self.known_face_encodings:
-                    face_distances = face_recognition.face_distance(
-                        self.known_face_encodings, 
-                        face_encoding
-                    )
-                    
-                    best_match_index = np.argmin(face_distances)
-                    best_distance = face_distances[best_match_index]
-                    
-                    if best_distance <= self.tolerance:
-                        name = self.known_face_names[best_match_index]
+                if not face_locations:
+                    return []
                 
-                face_names.append(name)
-            
-            # ✅ LOG OTIMIZADO: Removido log debug para cada frame
-            return face_names
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                face_names = []
+                
+                for face_encoding in face_encodings:
+                    name = "Desconhecido"
+                    
+                    if self.known_face_encodings:
+                        face_distances = face_recognition.face_distance(
+                            self.known_face_encodings, 
+                            face_encoding
+                        )
+                        best_match_index = np.argmin(face_distances)
+                        best_distance = face_distances[best_match_index]
+                        
+                        if best_distance <= self.tolerance:
+                            name = self.known_face_names[best_match_index]
+                    
+                    face_names.append(name)
+                
+                return face_names
             
         except Exception as e:
             # ✅ LOG OTIMIZADO: Erros apenas a cada 5 segundos
@@ -237,9 +221,10 @@ class FaceDetector:
     def contar_rostos(self, frame) -> int:
         """Conta quantos rostos aparecem no frame."""
         try:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            locations = face_recognition.face_locations(rgb, model='hog')
-            return len(locations)
+            with _DLIB_LOCK:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                locations = face_recognition.face_locations(rgb, model='hog')
+                return len(locations)
         except Exception as e:
             logger.error(f'Erro ao contar rostos: {e}')
             return 0
@@ -247,30 +232,31 @@ class FaceDetector:
     def extrair_encoding_principal(self, frame):
         """Extrai encoding do maior rosto no frame."""
         try:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            locations = face_recognition.face_locations(rgb, model='hog')
-            if not locations:
-                return None, 'Nenhum rosto detectado. Posicione a pessoa de frente para a câmera.'
-            if len(locations) > 1:
-                return None, (
-                    f'Estou vendo {len(locations)} rostos na câmera. '
-                    'Enquadre apenas uma pessoa para cadastrar.'
-                )
+            with _DLIB_LOCK:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                locations = face_recognition.face_locations(rgb, model='hog')
+                if not locations:
+                    return None, 'Nenhum rosto detectado. Posicione a pessoa de frente para a câmera.'
+                if len(locations) > 1:
+                    return None, (
+                        f'Estou vendo {len(locations)} rostos na câmera. '
+                        'Enquadre apenas uma pessoa para cadastrar.'
+                    )
 
-            def area(loc):
-                top, right, bottom, left = loc
-                return (bottom - top) * (right - left)
+                def area(loc):
+                    top, right, bottom, left = loc
+                    return (bottom - top) * (right - left)
 
-            locations = sorted(locations, key=area, reverse=True)
-            encodings = face_recognition.face_encodings(rgb, [locations[0]])
-            if not encodings:
-                return None, 'Não consegui capturar o rosto com qualidade suficiente.'
+                locations = sorted(locations, key=area, reverse=True)
+                encodings = face_recognition.face_encodings(rgb, [locations[0]])
+                if not encodings:
+                    return None, 'Não consegui capturar o rosto com qualidade suficiente.'
 
-            encoding = encodings[0]
-            ok, msg = self.verificar_encoding_qualidade(encoding)
-            if not ok:
-                return None, msg
-            return encoding, None
+                encoding = encodings[0]
+                ok, msg = self.verificar_encoding_qualidade(encoding)
+                if not ok:
+                    return None, msg
+                return encoding, None
         except Exception as e:
             logger.error(f'Erro ao extrair encoding: {e}')
             return None, 'Erro ao processar o rosto.'
@@ -316,44 +302,45 @@ class FaceDetector:
     def detectar_faces_bbox(self, frame):
         """Detecta rostos e retorna bbox normalizadas para o canvas."""
         try:
-            altura, largura = frame.shape[:2]
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            locations = face_recognition.face_locations(rgb, model='hog')
-            if not locations:
-                return []
+            with _DLIB_LOCK:
+                altura, largura = frame.shape[:2]
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                locations = face_recognition.face_locations(rgb, model='hog')
+                if not locations:
+                    return []
 
-            encodings = face_recognition.face_encodings(rgb, locations)
-            resultado = []
-            area_min = 0.008 * largura * altura
+                encodings = face_recognition.face_encodings(rgb, locations)
+                resultado = []
+                area_min = 0.008 * largura * altura
 
-            for (top, right, bottom, left), face_encoding in zip(locations, encodings):
-                w = right - left
-                h = bottom - top
-                if w * h < area_min:
-                    continue
+                for (top, right, bottom, left), face_encoding in zip(locations, encodings):
+                    w = right - left
+                    h = bottom - top
+                    if w * h < area_min:
+                        continue
 
-                nome = 'Desconhecido'
-                confianca = 0.0
+                    nome = 'Desconhecido'
+                    confianca = 0.0
 
-                if self.known_face_encodings:
-                    distances = face_recognition.face_distance(self.known_face_encodings, face_encoding)
-                    best = int(np.argmin(distances))
-                    dist = float(distances[best])
-                    confianca = max(0.0, 1.0 - dist)
-                    if dist <= self.tolerance and confianca >= self.min_confidence:
-                        nome = self.known_face_names[best]
+                    if self.known_face_encodings:
+                        distances = face_recognition.face_distance(self.known_face_encodings, face_encoding)
+                        best = int(np.argmin(distances))
+                        dist = float(distances[best])
+                        confianca = max(0.0, 1.0 - dist)
+                        if dist <= self.tolerance and confianca >= self.min_confidence:
+                            nome = self.known_face_names[best]
 
-                resultado.append({
-                    'nome': nome,
-                    'confianca': round(confianca, 2),
-                    'conhecido': nome != 'Desconhecido',
-                    'x': round(left / largura, 4),
-                    'y': round(top / altura, 4),
-                    'w': round(w / largura, 4),
-                    'h': round(h / altura, 4),
-                })
+                    resultado.append({
+                        'nome': nome,
+                        'confianca': round(confianca, 2),
+                        'conhecido': nome != 'Desconhecido',
+                        'x': round(left / largura, 4),
+                        'y': round(top / altura, 4),
+                        'w': round(w / largura, 4),
+                        'h': round(h / altura, 4),
+                    })
 
-            return self._deduplicar_rostos(resultado)
+                return self._deduplicar_rostos(resultado)
         except Exception as e:
             logger.error(f'Erro em detectar_faces_bbox: {e}')
             return []

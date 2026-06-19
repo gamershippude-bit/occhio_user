@@ -5,6 +5,7 @@ yolo_detector.py
 import cv2
 import numpy as np
 import logging
+import time
 from ultralytics import YOLO
 import os
 from typing import List, Dict, Any, Optional, Tuple
@@ -26,6 +27,9 @@ class YOLODetector:
         self.class_id_to_name = {}
         self.device = device
         self._ultimo_estado_log: set = set()
+        self._estado_pendente: set = set()
+        self._tempo_estado_pendente = 0.0
+        self._DEBOUNCE_SEGUNDOS = 1.5
         
         try:
             logger.info("🔄 Inicializando YOLO...")
@@ -228,16 +232,20 @@ class YOLODetector:
             # Pós-processamento
             detections = self._post_process_detections(detections)
             
-            # Log com debounce — só quando o conjunto de classes muda
+            # Log com debounce temporal — só após 1.5s de estado estável
             estado_atual = set(d['class'] for d in detections)
-            if estado_atual != self._ultimo_estado_log:
-                if estado_atual:
-                    logger.info(
-                        f"🔍 YOLO detectou {len(detections)} objeto(s): {', '.join(sorted(estado_atual))}"
-                    )
-                else:
-                    logger.info('🔍 Cena limpa — nenhum objeto detectado')
-                self._ultimo_estado_log = estado_atual
+            agora = time.time()
+
+            if estado_atual != self._estado_pendente:
+                self._estado_pendente = estado_atual
+                self._tempo_estado_pendente = agora
+            elif agora - self._tempo_estado_pendente >= self._DEBOUNCE_SEGUNDOS:
+                if estado_atual != self._ultimo_estado_log:
+                    if estado_atual:
+                        logger.info(f"🔍 YOLO: {', '.join(sorted(estado_atual))}")
+                    else:
+                        logger.info('🔍 Cena limpa')
+                    self._ultimo_estado_log = estado_atual
             
             return detections
             
