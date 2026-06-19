@@ -586,63 +586,65 @@ def gerar_resposta_voz(
             memoria.adicionar_turno(pergunta, resposta, deteccoes, rostos)
         return _limpar_resposta_fala(resposta), sug
 
-    resp = _responder_perigo(pergunta, deteccoes)
-    if resp:
-        return _gravar(resp)
+    pergunta = (pergunta or '').strip()
+    if not pergunta:
+        return _gravar('Não consegui entender sua pergunta.')
 
     intencao, termos_excluidos = IntencaoPergunta.classificar(pergunta)
-
-    resp = _responder_posicao(pergunta, deteccoes, memoria)
-    if resp:
-        return _gravar(resp)
 
     if intencao == IntencaoPergunta.IDENTIFICACAO and face_registry and cadastro_sessao:
         sugestao = face_registry.sugerir_cadastro_se_desconhecido(rostos, cadastro_sessao)
         if sugestao:
             return _gravar(sugestao, sug=True)
 
-    resposta_direta = _resposta_direta(intencao, pergunta, rostos, catalogo)
-    if resposta_direta:
-        return _gravar(resposta_direta)
-
-    if (
-        not deteccoes and not rostos and not catalogo
-        and intencao in (
-            IntencaoPergunta.CENA_GERAL, IntencaoPergunta.CENA_EXCLUSAO, IntencaoPergunta.DESCRICAO,
-        )
-    ):
-        return _gravar(random.choice(FALLBACKS_SEM_DETECCOES))
-
     if not glm_disponivel():
+        resp = _responder_perigo(pergunta, deteccoes)
+        if resp:
+            return _gravar(resp)
+        resp = _responder_posicao(pergunta, deteccoes, memoria)
+        if resp:
+            return _gravar(resp)
+        resposta_direta = _resposta_direta(intencao, pergunta, rostos, catalogo)
+        if resposta_direta:
+            return _gravar(resposta_direta)
+        if (
+            not deteccoes and not rostos and not catalogo
+            and intencao in (
+                IntencaoPergunta.CENA_GERAL, IntencaoPergunta.CENA_EXCLUSAO, IntencaoPergunta.DESCRICAO,
+            )
+        ):
+            return _gravar(random.choice(FALLBACKS_SEM_DETECCOES))
         return _gravar(random.choice(FALLBACKS_SEM_IA))
 
-    contexto = _formatar_contexto_voz(deteccoes, rostos, termos_excluidos, catalogo)
-
-    instrucao_extra = ""
+    instrucao_extra = ''
     if intencao == IntencaoPergunta.CENA_EXCLUSAO and termos_excluidos:
-        excluidos_fmt = ", ".join(termos_excluidos)
+        excluidos_fmt = ', '.join(termos_excluidos)
         instrucao_extra = (
-            f"\nIMPORTANTE: O usuário já sabe sobre '{excluidos_fmt}'. "
-            f"NÃO mencione isso. Fale apenas do que está na lista acima."
+            f'O usuário já sabe sobre "{excluidos_fmt}". '
+            f'Não mencione isso na resposta.\n'
         )
-    elif intencao == IntencaoPergunta.CENA_GERAL:
-        instrucao_extra = "\nDescreva os objetos presentes de forma natural e agrupada."
-    elif intencao == IntencaoPergunta.DESCRICAO:
-        instrucao_extra = "\nFaça uma descrição breve e natural da cena."
-
     if memoria and memoria.objetos_recentes():
-        objs = ", ".join(memoria.objetos_recentes())
-        instrucao_extra += f"\nObjetos mencionados recentemente: {objs}."
+        objs = ', '.join(memoria.objetos_recentes())
+        instrucao_extra += f'Objetos mencionados recentemente na conversa: {objs}.\n'
+
+    system_prompt = _montar_system_prompt_voz(deteccoes, rostos, catalogo)
+    historico = memoria.contexto_para_glm() if memoria else []
 
     user_content = (
-        f"Cena atual:\n{contexto}"
-        f"{instrucao_extra}\n\n"
-        f"Pergunta: \"{pergunta}\"\n\n"
-        "Responda de forma direta e natural, sem repetir o que o usuário disse:"
+        f'Pergunta do usuário: "{pergunta}"\n\n'
+        f'{instrucao_extra}'
+        'Responda de forma direta e natural em português brasileiro, '
+        'usando o contexto do sistema para decidir o que é relevante. '
+        'Não repita a pergunta na resposta.'
     )
 
-    historico = memoria.contexto_para_glm() if memoria else []
-    system_prompt = _montar_system_prompt_voz(deteccoes, rostos, catalogo)
+    logger.info(
+        '🎤 GLM — pergunta: "%s" | objetos: %d | rostos: %d | cadastrados: %d',
+        pergunta,
+        len(deteccoes),
+        len(rostos),
+        len(catalogo) if catalogo else 0,
+    )
 
     resposta = glm_chat(
         messages=[
@@ -1137,6 +1139,8 @@ def processar_pergunta_voz(
             'cadastro_ativo': False,
         }
 
+    logger.info('🎤 Transcrição: "%s"', transcricao)
+
     occhio = get_occhio_instance()
     resposta = None
     cadastro_ativo = False
@@ -1286,17 +1290,27 @@ def _executar_voz_background(
             memoria=stream_state.memoria,
             stream_state=stream_state,
         )
-        ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
+        try:
+            ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
+        except Exception as send_err:
+            err_msg = str(send_err).lower()
+            if 'connection closed' in err_msg or 'closed' in err_msg:
+                logger.warning('Cliente desconectou antes de receber resposta de voz')
+            else:
+                raise
     except Exception as e:
         logger.exception('Erro ao processar voz em background')
-        ws.send(json.dumps({
-            'tipo': 'resposta_voz',
-            'erro': str(e),
-            'transcricao': '',
-            'resposta': 'Ocorreu um erro ao processar sua pergunta.',
-            'audio_b64': None,
-            'cadastro_ativo': cadastro_sessao.em_andamento(),
-        }))
+        try:
+            ws.send(json.dumps({
+                'tipo': 'resposta_voz',
+                'erro': str(e),
+                'transcricao': '',
+                'resposta': 'Ocorreu um erro ao processar sua pergunta.',
+                'audio_b64': None,
+                'cadastro_ativo': cadastro_sessao.em_andamento(),
+            }))
+        except Exception:
+            logger.warning('Não foi possível enviar erro de voz — cliente desconectado')
     finally:
         stream_state.set_voz_ocupada(False)
 
@@ -1355,7 +1369,13 @@ def stream_ws(ws):
     cadastro_lock = threading.Lock()
     try:
         while True:
-            mensagem = ws.receive()
+            try:
+                mensagem = ws.receive()
+            except Exception as recv_err:
+                if 'Connection closed' in str(recv_err) or 'connection closed' in str(recv_err).lower():
+                    logger.info('WebSocket encerrado pelo cliente')
+                    break
+                raise
             if mensagem is None:
                 break
             try:
@@ -1425,7 +1445,10 @@ def stream_ws(ws):
             if frame_count % 30 == 0:
                 logger.info(f'{frame_count} frames processados | último: {resultado.get("ms")}ms')
     except Exception as e:
-        logger.exception(f'WebSocket encerrado: {e}')
+        if 'Connection closed' in str(e) or 'connection closed' in str(e).lower():
+            logger.info('WebSocket encerrado pelo cliente')
+        else:
+            logger.exception(f'WebSocket encerrado: {e}')
 
 
 @app.route('/health', methods=['GET'])
