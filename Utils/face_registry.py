@@ -4,12 +4,9 @@ Fluxo conversacional de cadastro de rostos conhecidos.
 import logging
 import re
 import time
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
-from Detectors.face_detector import _DLIB_LOCK
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +28,6 @@ NEGACOES = (
 PALAVRAS_SIM = CONFIRMACOES
 PALAVRAS_NAO = NEGACOES
 RESPOSTAS_SIM_CURTAS = frozenset({'s', 'si', 'sim', 'n', 'nao', 'não'})
-CADASTRO_TIMEOUT = 20.0
-
-
-@dataclass
-class CadastroSessao:
-    estado: str = 'idle'
-    encoding: Optional[np.ndarray] = None
-    nome: str = ''
-    relacao: str = ''
-    iniciado_em: float = 0.0
-    tentativas_aviso: int = 0
-
-    def reset(self) -> None:
-        self.estado = 'idle'
-        self.encoding = None
-        self.nome = ''
-        self.relacao = ''
-        self.iniciado_em = 0.0
-        self.tentativas_aviso = 0
-
-    def em_andamento(self) -> bool:
-        return self.estado != 'idle'
 
 
 def detectar_intencao_cadastro(texto: str) -> bool:
@@ -72,6 +47,11 @@ def detectar_intencao_cadastro(texto: str) -> bool:
         return True
     if any(p in t for p in PALAVRAS_CADASTRO) and any(
         x in t for x in ('pessoa', 'rosto', 'face', 'ele', 'ela', 'essa', 'esse', 'frente', 'câmera', 'camera')
+    ):
+        return True
+    if re.search(
+        r'\b(cadastr\w+|salv\w+|registr\w+|memoriz\w+|lembr\w+|anot\w+)\b.+\bcomo\b',
+        t,
     ):
         return True
     return False
@@ -104,17 +84,6 @@ def detectar_sim(texto: str) -> Optional[bool]:
         if p in t and len(p) >= 2:
             return True
     return None
-
-
-def extrair_nome(texto: str) -> str:
-    t = texto.strip()
-    for prefixo in (
-        r'^(o nome é|o nome e|nome é|nome e|se chama|chama|é|e)\s+',
-        r'^(meu amigo|minha amiga|meu|minha)\s+',
-    ):
-        t = re.sub(prefixo, '', t, flags=re.IGNORECASE).strip()
-    t = t.strip('.,!?\"\'')
-    return t[:120] if t else texto.strip()[:120]
 
 
 class FaceRegistry:
@@ -154,11 +123,6 @@ class FaceRegistry:
                 return {'nome': nome, 'relacao': rel}
         return None
 
-    def contar_rostos_no_frame(self, frame) -> int:
-        if not self.face_detector or not hasattr(self.face_detector, 'contar_rostos'):
-            return 0
-        return self.face_detector.contar_rostos(frame)
-
     def capturar_encoding_do_frame_atual(self, occhio, timeout: float = 5.0) -> Tuple[Optional[np.ndarray], Optional[str]]:
         """Solicita captura de encoding via loop de stream (evita dlib na thread de voz)."""
         if not occhio or not hasattr(occhio, '_encoding_request'):
@@ -185,159 +149,14 @@ class FaceRegistry:
     def capturar_encoding_async(self, occhio, timeout: float = 5.0) -> Tuple[Optional[np.ndarray], Optional[str]]:
         return self.capturar_encoding_do_frame_atual(occhio, timeout)
 
-    def capturar_encoding(self, frame=None, occhio=None) -> Tuple[Optional[np.ndarray], Optional[str]]:
-        if occhio is not None:
-            return self.capturar_encoding_async(occhio)
-
-        if not self.face_detector:
-            return None, 'Detector facial não disponível.'
-        if frame is None:
-            return None, 'Preciso da imagem da câmera para cadastrar. Mantenha a câmera ativa e tente de novo.'
-        if not hasattr(self.face_detector, 'extrair_encoding_principal'):
-            return None, 'Detector facial incompleto.'
-
-        qtd = self.contar_rostos_no_frame(frame)
-        if qtd == 0:
-            return None, 'Não encontrei nenhum rosto na câmera. Posicione a pessoa de frente e tente de novo.'
-        if qtd > 1:
-            return None, (
-                f'Estou vendo {qtd} rostos na câmera. '
-                'Enquadre apenas uma pessoa para cadastrar e tente de novo.'
-            )
-
-        encoding, msg = self.face_detector.extrair_encoding_principal(frame)
-        if encoding is None:
-            return None, msg or 'Não encontrei um rosto claro na câmera. Posicione a pessoa de frente e tente de novo.'
-        return encoding, None
-
-    def processar_mensagem(self, sessao: CadastroSessao, texto: str, frame=None, occhio=None) -> Optional[str]:
-        texto = (texto or '').strip()
-        if not texto:
-            return None
-
-        if sessao.em_andamento() and sessao.iniciado_em:
-            if time.time() - sessao.iniciado_em > CADASTRO_TIMEOUT:
-                sessao.reset()
-                return None
-
-        if detectar_intencao_cadastro(texto):
-            if sessao.em_andamento():
-                logger.warning('⚠️ Cadastro anterior incompleto detectado — resetando estado')
-                sessao.reset()
-
-        if sessao.estado == 'idle':
-            if not detectar_intencao_cadastro(texto):
-                return None
-            if occhio is None:
-                return 'Preciso da câmera ativa para cadastrar. Mantenha o stream conectado.'
-            encoding, erro = self.capturar_encoding_async(occhio)
-            if erro:
-                return erro
-            with _DLIB_LOCK:
-                if self.face_store and self.face_store.face_exists(encoding):
-                    existente = None
-                    if hasattr(self.face_store, 'find_existing_name'):
-                        existente = self.face_store.find_existing_name(encoding)
-                    if existente:
-                        meta = self._meta_rosto(existente)
-                        rel = meta.get('relacao') if meta else None
-                        if rel:
-                            return f'{existente} já está cadastrado como {rel}.'
-                        return f'{existente} já está cadastrado.'
-                    return 'Essa pessoa já parece estar cadastrada.'
-            sessao.encoding = encoding
-            sessao.estado = 'aguardando_nome'
-            sessao.iniciado_em = time.time()
-            return 'Qual o nome dessa pessoa?'
-
-        if sessao.estado == 'aguardando_nome':
-            nome = extrair_nome(texto)
-            if len(nome) < 2:
-                return 'Repita o nome, por favor.'
-            sessao.nome = nome
-            sessao.estado = 'aguardando_relacao'
-            return f'Qual sua relação com {nome}?'
-
-        if sessao.estado == 'aguardando_relacao':
-            relacao = texto.strip()
-            if len(relacao) < 2:
-                return 'Exemplo: amigo, irmão ou colega.'
-            sessao.relacao = relacao
-            sessao.estado = 'aguardando_aviso'
-            sessao.tentativas_aviso = 0
-            return f'{sessao.nome} será salvo como {relacao}. Avisar quando aparecer?'
-
-        if sessao.estado == 'aguardando_aviso':
-            decisao = detectar_sim(texto)
-            if decisao is None:
-                sessao.tentativas_aviso += 1
-                if sessao.tentativas_aviso >= 2:
-                    return self._finalizar_cadastro(sessao, avisar=False)
-                return 'Diga sim ou não.'
-            return self._finalizar_cadastro(sessao, avisar=decisao)
-
-        return None
-
-    def _finalizar_cadastro(self, sessao: CadastroSessao, avisar: bool) -> str:
-        nome = sessao.nome
-        relacao = sessao.relacao
-        encoding = sessao.encoding
-
-        if encoding is None or not nome:
-            sessao.reset()
-            return 'O cadastro foi interrompido. Podemos começar de novo quando quiser.'
-
-        if not self.face_store:
-            sessao.reset()
-            return 'O banco de dados não está configurado. Configure as variáveis DB_* no servidor.'
-
-        ok = self.face_store.save_face(
-            face_encoding=encoding,
-            nome=nome,
-            relacao=relacao,
-            label=nome,
-            avisar=avisar,
-        )
-        sessao.reset()
-
-        if not ok:
-            return f'Não consegui salvar {nome} no banco. Tente novamente.'
-
-        self.recarregar_rostos()
-        if avisar:
-            return f'Pronto, vou lembrar de {nome} quando aparecer.'
-        return f'Pronto, {nome} cadastrado.'
-
-    def sugerir_cadastro_se_desconhecido(
-        self, rostos: list, cadastro_sessao: CadastroSessao
-    ) -> Optional[str]:
+    def sugerir_cadastro_se_desconhecido(self, rostos: list, occhio=None) -> Optional[str]:
         """Sugere cadastro quando há rosto desconhecido e nenhum cadastro em andamento."""
+        if occhio and getattr(occhio, '_cadastro_pendente', None):
+            return None
         desconhecidos = [r for r in rostos if not r.get('conhecido')]
-        if not desconhecidos or cadastro_sessao.em_andamento():
+        if not desconhecidos:
             return None
         return 'Não reconheço esse rosto. Quer que eu aprenda quem é?'
-
-    def iniciar_cadastro_confirmado(
-        self, sessao: CadastroSessao, frame=None, occhio=None
-    ) -> Optional[str]:
-        """Inicia cadastro após o usuário confirmar a sugestão."""
-        if occhio is None:
-            return 'Preciso da câmera ativa para aprender o rosto.'
-        encoding, erro = self.capturar_encoding_async(occhio)
-        if erro:
-            return erro
-        with _DLIB_LOCK:
-            if self.face_store and self.face_store.face_exists(encoding):
-                existente = None
-                if hasattr(self.face_store, 'find_existing_name'):
-                    existente = self.face_store.find_existing_name(encoding)
-                if existente:
-                    return f'{existente} já está cadastrado.'
-                return 'Essa pessoa já parece estar cadastrada.'
-        sessao.encoding = encoding
-        sessao.estado = 'aguardando_nome'
-        sessao.iniciado_em = time.time()
-        return 'Qual o nome dessa pessoa?'
 
     def remover_por_nome(self, nome: str) -> bool:
         """Remove rosto pelo nome (case-insensitive, busca parcial)."""
@@ -361,12 +180,6 @@ class FaceRegistry:
             self.recarregar_rostos()
             return True
         return False
-
-    def cancelar(self, sessao: CadastroSessao) -> str:
-        if sessao.em_andamento():
-            sessao.reset()
-            return 'Cadastro cancelado.'
-        return ''
 
     def detectar_faces_stream(self, frame) -> List[Dict[str, Any]]:
         if not self.face_detector or not hasattr(self.face_detector, 'detectar_faces_bbox'):
@@ -398,7 +211,6 @@ class FaceRegistry:
             if agora - ultimo < self.alerta_cooldown:
                 continue
             self._alertas_recentes[nome] = agora
-            meta = self._meta_rosto(nome) or {}
             alertas.append({
                 'nome': nome,
                 'mensagem': f'{nome} está aqui.',
@@ -415,7 +227,7 @@ class FaceRegistry:
         return dict(self._catalog)
 
 
-def recarregar_estado_facial(occhio, cadastro_sessao: Optional['CadastroSessao'] = None) -> bool:
+def recarregar_estado_facial(occhio) -> bool:
     """
     Recarrega completamente o estado de reconhecimento facial a partir do banco.
     Deve ser chamada após qualquer operação de escrita (salvar, deletar, renomear, atualizar).
@@ -426,9 +238,7 @@ def recarregar_estado_facial(occhio, cadastro_sessao: Optional['CadastroSessao']
 
         qtd = occhio.face_registry.recarregar_rostos()
         occhio._last_rostos = []
-
-        if cadastro_sessao and cadastro_sessao.em_andamento():
-            cadastro_sessao.reset()
+        occhio._cadastro_pendente = None
 
         logger.info(f'✅ Estado facial recarregado: {qtd} rosto(s)')
         return True
