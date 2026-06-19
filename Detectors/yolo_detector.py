@@ -25,6 +25,7 @@ class YOLODetector:
         self.classes = None
         self.class_id_to_name = {}
         self.device = device
+        self._ultimo_estado_log: set = set()
         
         try:
             logger.info("🔄 Inicializando YOLO...")
@@ -227,13 +228,16 @@ class YOLODetector:
             # Pós-processamento
             detections = self._post_process_detections(detections)
             
-            # Log dos resultados — só quando há detecção
-            if detections:
-                logger.info(f"🔍 YOLO detectou {len(detections)} objetos válidos")
-                for i, det in enumerate(detections[:3]):  # Mostrar apenas 3 principais
-                    bbox = det['bbox']
-                    logger.info(f"   [{i+1}] {det['class']}: {det['confidence']:.3f} "
-                              f"at ({bbox['x']}, {bbox['y']}) {bbox['width']}x{bbox['height']}")
+            # Log com debounce — só quando o conjunto de classes muda
+            estado_atual = set(d['class'] for d in detections)
+            if estado_atual != self._ultimo_estado_log:
+                if estado_atual:
+                    logger.info(
+                        f"🔍 YOLO detectou {len(detections)} objeto(s): {', '.join(sorted(estado_atual))}"
+                    )
+                else:
+                    logger.info('🔍 Cena limpa — nenhum objeto detectado')
+                self._ultimo_estado_log = estado_atual
             
             return detections
             

@@ -133,6 +133,7 @@ class FaceRegistry:
             self.face_detector.carregar_encodings(encodings, nomes)
             if hasattr(self.face_store, 'get_faces_catalog'):
                 self._catalog = self.face_store.get_faces_catalog()
+            self._alertas_recentes.clear()
             logger.info(f'📥 {len(nomes)} rosto(s) do banco: {list(self._catalog.values())}')
             return len(nomes)
         except Exception as e:
@@ -185,6 +186,11 @@ class FaceRegistry:
             if time.time() - sessao.iniciado_em > CADASTRO_TIMEOUT:
                 sessao.reset()
                 return None
+
+        if detectar_intencao_cadastro(texto):
+            if sessao.em_andamento():
+                logger.warning('⚠️ Cadastro anterior incompleto detectado — resetando estado')
+                sessao.reset()
 
         if sessao.estado == 'idle':
             if not detectar_intencao_cadastro(texto):
@@ -372,3 +378,25 @@ class FaceRegistry:
                 self._catalog = catalog
             return catalog
         return dict(self._catalog)
+
+
+def recarregar_estado_facial(occhio, cadastro_sessao: Optional['CadastroSessao'] = None) -> bool:
+    """
+    Recarrega completamente o estado de reconhecimento facial a partir do banco.
+    Deve ser chamada após qualquer operação de escrita (salvar, deletar, renomear, atualizar).
+    """
+    try:
+        if not occhio or not occhio.face_registry:
+            return False
+
+        qtd = occhio.face_registry.recarregar_rostos()
+        occhio._last_rostos = []
+
+        if cadastro_sessao and cadastro_sessao.em_andamento():
+            cadastro_sessao.reset()
+
+        logger.info(f'✅ Estado facial recarregado: {qtd} rosto(s)')
+        return True
+    except Exception as e:
+        logger.error(f'❌ Erro ao recarregar estado facial: {e}')
+        return False

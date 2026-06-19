@@ -26,7 +26,7 @@ from flask_sock import Sock
 from typing import Dict, List, Any, Optional
 
 from Utils.glm_client import chat as glm_chat, glm_disponivel
-from Utils.face_registry import FaceRegistry, CadastroSessao, detectar_sim
+from Utils.face_registry import FaceRegistry, CadastroSessao, detectar_sim, recarregar_estado_facial
 from Utils.face_store import criar_face_store
 from Utils.conversation_memory import ConversationMemory
 
@@ -546,7 +546,7 @@ def _formatar_catalogo_detalhado(catalogo: Optional[Dict[str, dict]]) -> str:
     return '\n'.join(linhas) if linhas else 'Nenhuma pessoa cadastrada.'
 
 
-def executar_acao_banco(acao: dict, occhio) -> str:
+def executar_acao_banco(acao: dict, occhio, cadastro_sessao: Optional[CadastroSessao] = None) -> str:
     tipo = acao.get('tipo')
     nome_atual = acao.get('nome_atual', '')
     novo_valor = acao.get('novo_valor', '')
@@ -570,13 +570,17 @@ def executar_acao_banco(acao: dict, occhio) -> str:
     else:
         return 'erro: tipo de ação desconhecido'
 
-    if ok and occhio.face_registry:
-        occhio.face_registry.recarregar_rostos()
+    if ok:
+        recarregar_estado_facial(occhio, cadastro_sessao)
 
     return 'ok' if ok else 'não encontrado'
 
 
-def _processar_resposta_glm_acao(resposta: str, occhio) -> str:
+def _processar_resposta_glm_acao(
+    resposta: str,
+    occhio,
+    cadastro_sessao: Optional[CadastroSessao] = None,
+) -> str:
     """Separa AÇÃO/FALA do GLM, executa escrita no banco e retorna só o texto falado."""
     texto = (resposta or '').strip()
     if not re.match(r'^A[CÇ]ÃO:', texto, re.IGNORECASE):
@@ -598,7 +602,7 @@ def _processar_resposta_glm_acao(resposta: str, occhio) -> str:
             fala = partes[1].strip()
 
         acao = json.loads(acao_json_str)
-        resultado = executar_acao_banco(acao, occhio)
+        resultado = executar_acao_banco(acao, occhio, cadastro_sessao)
         logger.info('🗄️ Ação banco: %s → %s', acao, resultado)
 
         if fala:
@@ -753,7 +757,7 @@ def gerar_resposta_voz(
     )
 
     instancia = occhio or get_occhio_instance()
-    resposta = _processar_resposta_glm_acao(resposta, instancia)
+    resposta = _processar_resposta_glm_acao(resposta, instancia, cadastro_sessao)
 
     if memoria:
         memoria.adicionar_turno(pergunta, resposta, deteccoes, rostos)
@@ -1238,99 +1242,122 @@ def processar_pergunta_voz(
 
     logger.info('🎤 Transcrição: "%s"', transcricao)
 
-    occhio = get_occhio_instance()
-    resposta = None
-    cadastro_ativo = False
+    transcricao_atual = transcricao
+    try:
+        occhio = get_occhio_instance()
+        resposta = None
+        cadastro_ativo = False
 
-    frame = None
-    if frame_b64:
-        try:
-            frame = occhio._decodificar_imagem(frame_b64)
-        except Exception:
-            pass
+        frame = None
+        if frame_b64:
+            try:
+                frame = occhio._decodificar_imagem(frame_b64)
+            except Exception:
+                pass
 
-    # ── Remoção pendente (confirmação) ──────────────────────────────
-    if stream_state and stream_state.remocao_pendente:
-        nome_pendente = stream_state.remocao_pendente
-        if _eh_confirmacao(transcricao):
+        # ── Remoção pendente (confirmação) ──────────────────────────────
+        if stream_state and stream_state.remocao_pendente:
+            nome_pendente = stream_state.remocao_pendente
+            if _eh_confirmacao(transcricao_atual):
+                stream_state.remocao_pendente = None
+                removido = False
+                if occhio.face_registry:
+                    removido = occhio.face_registry.remover_por_nome(nome_pendente)
+                if removido:
+                    recarregar_estado_facial(occhio, cadastro_sessao)
+                msg = (
+                    f'Pronto, não vou mais reconhecer {nome_pendente}.'
+                    if removido else
+                    'Não encontrei ninguém com esse nome cadastrado.'
+                )
+                if memoria:
+                    memoria.adicionar_turno(transcricao_atual, msg, deteccoes_atuais, rostos_atuais)
+                return _finalizar_resposta_voz(transcricao_atual, msg)
+            if _eh_negacao(transcricao_atual):
+                stream_state.remocao_pendente = None
+                return _finalizar_resposta_voz(transcricao_atual, 'Ok, mantive o cadastro.')
             stream_state.remocao_pendente = None
-            removido = False
-            if occhio.face_registry:
-                removido = occhio.face_registry.remover_por_nome(nome_pendente)
-            msg = (
-                f'Pronto, não vou mais reconhecer {nome_pendente}.'
-                if removido else
-                'Não encontrei ninguém com esse nome cadastrado.'
-            )
+
+        # ── Nova intenção de remoção ────────────────────────────────────
+        nome_remover = _detectar_intencao_remocao(transcricao_atual)
+        if nome_remover and stream_state and not (cadastro_sessao and cadastro_sessao.em_andamento()):
+            stream_state.remocao_pendente = nome_remover
+            msg = f'Tem certeza que quer que eu esqueça {nome_remover}?'
             if memoria:
-                memoria.adicionar_turno(transcricao, msg, deteccoes_atuais, rostos_atuais)
-            return _finalizar_resposta_voz(transcricao, msg)
-        if _eh_negacao(transcricao):
-            stream_state.remocao_pendente = None
-            return _finalizar_resposta_voz(transcricao, 'Ok, mantive o cadastro.')
-        stream_state.remocao_pendente = None
+                memoria.adicionar_turno(transcricao_atual, msg, deteccoes_atuais, rostos_atuais)
+            return _finalizar_resposta_voz(transcricao_atual, msg)
 
-    # ── Nova intenção de remoção ────────────────────────────────────
-    nome_remover = _detectar_intencao_remocao(transcricao)
-    if nome_remover and stream_state and not (cadastro_sessao and cadastro_sessao.em_andamento()):
-        stream_state.remocao_pendente = nome_remover
-        msg = f'Tem certeza que quer que eu esqueça {nome_remover}?'
-        if memoria:
-            memoria.adicionar_turno(transcricao, msg, deteccoes_atuais, rostos_atuais)
-        return _finalizar_resposta_voz(transcricao, msg)
-
-    # ── Confirmação de cadastro sugerido ─────────────────────────────
-    if stream_state and stream_state.sugestao_cadastro_pendente and occhio.face_registry:
-        if _eh_confirmacao(transcricao):
+        # ── Confirmação de cadastro sugerido ─────────────────────────────
+        if stream_state and stream_state.sugestao_cadastro_pendente and occhio.face_registry:
+            if _eh_confirmacao(transcricao_atual):
+                stream_state.sugestao_cadastro_pendente = False
+                lock = cadastro_lock or threading.Lock()
+                with lock:
+                    resposta = occhio.face_registry.iniciar_cadastro_confirmado(
+                        cadastro_sessao, frame=frame
+                    )
+                    cadastro_ativo = cadastro_sessao.em_andamento() if cadastro_sessao else False
+                if resposta and memoria:
+                    memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
+                return _finalizar_resposta_voz(
+                    transcricao_atual,
+                    resposta or 'Não consegui iniciar o cadastro.',
+                    cadastro_ativo,
+                )
+            if _eh_negacao(transcricao_atual):
+                stream_state.sugestao_cadastro_pendente = False
+                return _finalizar_resposta_voz(transcricao_atual, 'Ok, sem problemas.')
             stream_state.sugestao_cadastro_pendente = False
+
+        # ── Cadastro em andamento ─────────────────────────────────────────
+        if cadastro_sessao and occhio.face_registry:
             lock = cadastro_lock or threading.Lock()
             with lock:
-                resposta = occhio.face_registry.iniciar_cadastro_confirmado(
-                    cadastro_sessao, frame=frame
+                resposta_cadastro = occhio.face_registry.processar_mensagem(
+                    cadastro_sessao, transcricao_atual, frame=frame
                 )
-                cadastro_ativo = cadastro_sessao.em_andamento() if cadastro_sessao else False
-            if resposta and memoria:
-                memoria.adicionar_turno(transcricao, resposta, deteccoes_atuais, rostos_atuais)
-            return _finalizar_resposta_voz(transcricao, resposta or 'Não consegui iniciar o cadastro.', cadastro_ativo)
-        if _eh_negacao(transcricao):
-            stream_state.sugestao_cadastro_pendente = False
-            return _finalizar_resposta_voz(transcricao, 'Ok, sem problemas.')
-        stream_state.sugestao_cadastro_pendente = False
+                if resposta_cadastro:
+                    resposta = resposta_cadastro
+                    cadastro_ativo = cadastro_sessao.em_andamento()
 
-    # ── Cadastro em andamento ─────────────────────────────────────────
-    if cadastro_sessao and occhio.face_registry:
-        lock = cadastro_lock or threading.Lock()
-        with lock:
-            resposta_cadastro = occhio.face_registry.processar_mensagem(
-                cadastro_sessao, transcricao, frame=frame
+        # ── Resposta principal (GLM + memória) ────────────────────────────
+        if resposta is None:
+            catalogo = None
+            if occhio.face_registry:
+                catalogo = occhio.face_registry.get_catalogo()
+            resposta, sugestao = gerar_resposta_voz(
+                transcricao_atual,
+                deteccoes_atuais,
+                rostos_atuais,
+                memoria=memoria,
+                catalogo=catalogo,
+                face_registry=occhio.face_registry,
+                cadastro_sessao=cadastro_sessao,
+                occhio=occhio,
             )
-            if resposta_cadastro:
-                resposta = resposta_cadastro
-                cadastro_ativo = cadastro_sessao.em_andamento()
+            if stream_state and sugestao:
+                stream_state.sugestao_cadastro_pendente = True
+        else:
+            resposta = _limpar_resposta_fala(resposta)
+            if memoria:
+                memoria.adicionar_turno(transcricao_atual, resposta, deteccoes_atuais, rostos_atuais)
 
-    # ── Resposta principal (GLM + memória) ────────────────────────────
-    if resposta is None:
-        catalogo = None
-        if occhio.face_registry:
-            catalogo = occhio.face_registry.get_catalogo()
-        resposta, sugestao = gerar_resposta_voz(
-            transcricao,
-            deteccoes_atuais,
-            rostos_atuais,
-            memoria=memoria,
-            catalogo=catalogo,
-            face_registry=occhio.face_registry,
-            cadastro_sessao=cadastro_sessao,
-            occhio=occhio,
+        return _finalizar_resposta_voz(transcricao_atual, resposta, cadastro_ativo)
+
+    except Exception as e:
+        logger.error(f'❌ Erro no pipeline de voz: {e}')
+        try:
+            recarregar_estado_facial(
+                occhio if 'occhio' in locals() and occhio else get_occhio_instance(),
+                cadastro_sessao,
+            )
+        except Exception:
+            pass
+        return _finalizar_resposta_voz(
+            transcricao_atual,
+            'Ocorreu um erro interno. Pode repetir?',
+            cadastro_sessao.em_andamento() if cadastro_sessao else False,
         )
-        if stream_state and sugestao:
-            stream_state.sugestao_cadastro_pendente = True
-    else:
-        resposta = _limpar_resposta_fala(resposta)
-        if memoria:
-            memoria.adicionar_turno(transcricao, resposta, deteccoes_atuais, rostos_atuais)
-
-    return _finalizar_resposta_voz(transcricao, resposta, cadastro_ativo)
 
 
 class _StreamState:
