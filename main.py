@@ -573,7 +573,17 @@ def _contar_pessoas_catalogo(catalogo) -> int:
 
 
 def _cadastro_ativo(occhio) -> bool:
-    return getattr(occhio, '_cadastro_pendente', None) is not None
+    return (
+        getattr(occhio, '_cadastro_pendente', None) is not None
+        or getattr(occhio, '_aguardando_nome_simples', False)
+        or getattr(occhio, '_aguardando_relacao_simples', False)
+    )
+
+
+def _limpar_modo_cadastro(occhio) -> None:
+    occhio._cadastro_pendente = None
+    occhio._aguardando_nome_simples = False
+    occhio._aguardando_relacao_simples = False
 
 
 def _valor_cadastro_campo(val) -> Optional[str]:
@@ -601,24 +611,48 @@ def extrair_dados_cadastro_via_glm(transcricao: str) -> Optional[dict]:
     if not transcricao or not glm_disponivel():
         return None
 
-    prompt = f"""O usuário quer cadastrar uma pessoa. Extraia as informações da frase abaixo.
+    prompt = f"""Extraia dados de cadastro da frase do usuário.
 
 Frase: "{transcricao}"
 
-Responda APENAS com JSON válido neste formato exato, sem texto adicional:
-{{
-  "nome": "nome da pessoa ou null se não mencionado",
-  "relacao": "relação com a pessoa ou null se não mencionado",
-  "avisar": true ou false (true se o usuário quer ser avisado quando a pessoa aparecer, false se não quer ou não mencionou)
-}}
+Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem markdown:
+{{"nome": "nome mencionado ou null", "relacao": "relação mencionada ou null", "avisar": false}}
 
-Se o nome não foi mencionado, retorne null no campo nome.
-Se a relação não foi mencionada, retorne null no campo relacao."""
+Se não há nome, coloque null. Se não há relação, coloque null."""
 
+    resposta_bruta = ''
     try:
-        resposta = glm_chat([{'role': 'user', 'content': prompt}], max_tokens=120, temperature=0.1)
-        texto = re.sub(r'```json|```', '', resposta).strip()
-        return json.loads(texto)
+        resposta_bruta = glm_chat(
+            [
+                {'role': 'system', 'content': 'Você extrai dados estruturados. Responda somente JSON válido.'},
+                {'role': 'user', 'content': prompt},
+            ],
+            max_tokens=150,
+            temperature=0.0,
+        )
+        logger.debug("🔍 GLM cadastro resposta bruta: '%s'", resposta_bruta)
+
+        if not resposta_bruta or not resposta_bruta.strip():
+            logger.error('❌ GLM retornou resposta vazia para extração de cadastro')
+            return None
+
+        texto = re.sub(r'```json|```', '', resposta_bruta).strip()
+        match = re.search(r'\{.*\}', texto, re.DOTALL)
+        if match:
+            texto = match.group(0)
+
+        dados = json.loads(texto)
+
+        for campo in ('nome', 'relacao'):
+            if dados.get(campo) in ('null', 'None', '', 'undefined'):
+                dados[campo] = None
+
+        logger.info('✅ Dados extraídos: %s', dados)
+        return dados
+
+    except json.JSONDecodeError as e:
+        logger.error("❌ JSON inválido na extração de cadastro: '%s' | erro: %s", resposta_bruta, e)
+        return None
     except Exception as e:
         logger.error('❌ Erro ao extrair dados de cadastro: %s', e)
         return None
@@ -652,20 +686,80 @@ def _salvar_cadastro_rosto(occhio, nome: str, relacao: str, avisar: bool) -> str
         return 'Não consegui salvar. Tenta de novo.'
 
     recarregar_estado_facial(occhio)
-    occhio._cadastro_pendente = None
+    _limpar_modo_cadastro(occhio)
     fala = f'Pronto, cadastrei {nome} como {relacao}.'
     if avisar:
         fala += ' Vou avisar quando ele aparecer.'
     return fala
 
 
+def _iniciar_modo_cadastro_simples(occhio, pendente: Optional[dict] = None) -> str:
+    """Fallback: perguntas diretas sem parsear JSON via GLM."""
+    pendente = pendente or {}
+    occhio._cadastro_pendente = {
+        'nome': pendente.get('nome'),
+        'relacao': pendente.get('relacao'),
+        'avisar': pendente.get('avisar', False),
+    }
+    if pendente.get('nome') and not pendente.get('relacao'):
+        occhio._aguardando_nome_simples = False
+        occhio._aguardando_relacao_simples = True
+        return f'Perfeito. Qual sua relação com {pendente["nome"]}?'
+
+    occhio._aguardando_nome_simples = True
+    occhio._aguardando_relacao_simples = False
+    return 'Não consegui entender os dados. Pode me dizer o nome da pessoa?'
+
+
+def _processar_cadastro_simples(occhio, transcricao: str) -> str:
+    transcricao = (transcricao or '').strip().strip('.,!? ')
+    pendente = dict(occhio._cadastro_pendente or {})
+    avisar = pendente.get('avisar', False)
+
+    if getattr(occhio, '_aguardando_nome_simples', False):
+        if len(transcricao) < 2:
+            return 'Repita o nome, por favor.'
+        occhio._aguardando_nome_simples = False
+        nome = transcricao
+        occhio._cadastro_pendente = {
+            'nome': nome,
+            'relacao': pendente.get('relacao'),
+            'avisar': avisar,
+        }
+        if pendente.get('relacao'):
+            return _salvar_cadastro_rosto(occhio, nome, pendente['relacao'], avisar)
+        occhio._aguardando_relacao_simples = True
+        return f'Perfeito. Qual sua relação com {nome}?'
+
+    if getattr(occhio, '_aguardando_relacao_simples', False):
+        if len(transcricao) < 2:
+            return 'Exemplo: amigo, irmão ou colega.'
+        occhio._aguardando_relacao_simples = False
+        nome = pendente.get('nome', '')
+        return _salvar_cadastro_rosto(occhio, nome, transcricao, avisar)
+
+    return _iniciar_modo_cadastro_simples(occhio, pendente)
+
+
 def _processar_fluxo_cadastro(occhio, transcricao: str) -> str:
     """Extrai dados via GLM, completa pendências e salva quando possível."""
     if not hasattr(occhio, '_cadastro_pendente'):
         occhio._cadastro_pendente = None
+    if not hasattr(occhio, '_aguardando_nome_simples'):
+        occhio._aguardando_nome_simples = False
+    if not hasattr(occhio, '_aguardando_relacao_simples'):
+        occhio._aguardando_relacao_simples = False
+
+    if occhio._aguardando_nome_simples or occhio._aguardando_relacao_simples:
+        return _processar_cadastro_simples(occhio, transcricao)
+
+    if not glm_disponivel():
+        return _iniciar_modo_cadastro_simples(occhio, occhio._cadastro_pendente)
 
     pendente = dict(occhio._cadastro_pendente or {})
+    tentativas = int(pendente.get('tentativas', 0))
     dados_novos = extrair_dados_cadastro_via_glm(transcricao)
+    extracao_falhou = dados_novos is None
 
     nome = pendente.get('nome') or (_valor_cadastro_campo(dados_novos.get('nome')) if dados_novos else None)
     relacao = pendente.get('relacao') or (_valor_cadastro_campo(dados_novos.get('relacao')) if dados_novos else None)
@@ -676,15 +770,24 @@ def _processar_fluxo_cadastro(occhio, transcricao: str) -> str:
     if nome and relacao:
         return _salvar_cadastro_rosto(occhio, nome, relacao, avisar)
 
+    if extracao_falhou and not (nome or relacao):
+        tentativas += 1
+    elif nome or relacao:
+        tentativas = 0
+
+    if tentativas >= 3:
+        logger.warning('⚠️ Extração GLM falhou %d vezes — modo cadastro simples', tentativas)
+        return _iniciar_modo_cadastro_simples(occhio, {'nome': nome, 'relacao': relacao, 'avisar': avisar})
+
     if relacao and not nome:
-        occhio._cadastro_pendente = {'relacao': relacao, 'avisar': avisar}
+        occhio._cadastro_pendente = {'relacao': relacao, 'avisar': avisar, 'tentativas': tentativas}
         return 'Qual o nome da pessoa?'
 
     if nome and not relacao:
-        occhio._cadastro_pendente = {'nome': nome, 'avisar': avisar}
+        occhio._cadastro_pendente = {'nome': nome, 'avisar': avisar, 'tentativas': tentativas}
         return f'Qual sua relação com {nome}?'
 
-    occhio._cadastro_pendente = {'avisar': avisar}
+    occhio._cadastro_pendente = {'avisar': avisar, 'tentativas': tentativas}
     return 'Qual o nome e sua relação com essa pessoa?'
 
 
@@ -977,6 +1080,8 @@ class OcchioCloud:
             self._encoding_erro = None
             self._cadastro_pendente = None
             self._cadastro_lock = threading.Lock()
+            self._aguardando_nome_simples = False
+            self._aguardando_relacao_simples = False
 
             self._inicializar_yolo()
             self._inicializar_faces()
@@ -1057,6 +1162,8 @@ class OcchioCloud:
         self._encoding_erro = None
         self._cadastro_pendente = None
         self._cadastro_lock = threading.Lock()
+        self._aguardando_nome_simples = False
+        self._aguardando_relacao_simples = False
         logger.warning("⚠️ Sistema em modo emergência")
 
     def _decodificar_imagem(self, dados_imagem: str) -> np.ndarray:
@@ -1446,7 +1553,7 @@ def processar_pergunta_voz(
                 return _finalizar_resposta_voz(transcricao_atual, 'Ok, mantive o cadastro.')
             stream_state.remocao_pendente = None
 
-        # ── Cadastro pendente — completa antes do GLM normal ────────────
+        # ── Cadastro pendente ou modo simples — completa antes do GLM normal ─
         if _cadastro_ativo(occhio) and occhio.face_registry:
             with occhio._cadastro_lock:
                 resposta = _processar_fluxo_cadastro(occhio, transcricao_atual)

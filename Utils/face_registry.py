@@ -151,7 +151,11 @@ class FaceRegistry:
 
     def sugerir_cadastro_se_desconhecido(self, rostos: list, occhio=None) -> Optional[str]:
         """Sugere cadastro quando há rosto desconhecido e nenhum cadastro em andamento."""
-        if occhio and getattr(occhio, '_cadastro_pendente', None):
+        if occhio and (
+            getattr(occhio, '_cadastro_pendente', None)
+            or getattr(occhio, '_aguardando_nome_simples', False)
+            or getattr(occhio, '_aguardando_relacao_simples', False)
+        ):
             return None
         desconhecidos = [r for r in rostos if not r.get('conhecido')]
         if not desconhecidos:
@@ -238,7 +242,12 @@ def recarregar_estado_facial(occhio) -> bool:
 
         qtd = occhio.face_registry.recarregar_rostos()
         occhio._last_rostos = []
-        occhio._cadastro_pendente = None
+        if hasattr(occhio, '_cadastro_pendente'):
+            occhio._cadastro_pendente = None
+        if hasattr(occhio, '_aguardando_nome_simples'):
+            occhio._aguardando_nome_simples = False
+        if hasattr(occhio, '_aguardando_relacao_simples'):
+            occhio._aguardando_relacao_simples = False
 
         logger.info(f'✅ Estado facial recarregado: {qtd} rosto(s)')
         return True

@@ -56,4 +56,8 @@ def chat(messages, model=None, max_tokens=200, temperature=0.7) -> str:
         max_tokens=max_tokens,
         temperature=temperature,
     )
-    return response.choices[0].message.content.strip()
+    if not response.choices:
+        logger.warning('GLM retornou choices vazio')
+        return ''
+    content = response.choices[0].message.content
+    return (content or '').strip()
