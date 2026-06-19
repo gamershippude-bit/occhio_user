@@ -362,4 +362,10 @@ class FaceRegistry:
         return alertas
 
     def get_catalogo(self) -> Dict[str, dict]:
+        """Retorna o catálogo completo de rostos cadastrados."""
+        if self.face_store and hasattr(self.face_store, 'get_faces_catalog'):
+            catalog = self.face_store.get_faces_catalog() or {}
+            if catalog:
+                self._catalog = catalog
+            return catalog
         return dict(self._catalog)

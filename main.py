@@ -415,7 +415,7 @@ def _resposta_direta(
 
     if intencao == IntencaoPergunta.IDENTIFICACAO:
         if not rostos:
-            return "Não vejo nenhuma pessoa na câmera agora."
+            return None
         if conhecidos and qtd_desconhecidos == 0:
             nomes = ", ".join(r.get("nome", "?") for r in conhecidos)
             return f"{nomes} está{'o' if len(conhecidos) > 1 else ''} na câmera."
@@ -492,6 +492,81 @@ def _rostos_unicos(rostos: List[Dict]) -> tuple:
     return list(conhecidos_map.values()), desconhecidos
 
 
+def _formatar_objetos_camera(deteccoes: List[Dict]) -> str:
+    if not deteccoes:
+        return ""
+    itens = []
+    for d in deteccoes:
+        nome = d.get('nome', '?')
+        conf = d.get('confianca', d.get('confidence'))
+        if conf is not None:
+            pct = int(round(float(conf) * 100))
+            itens.append(f"{nome} ({pct}% confiança)")
+        else:
+            itens.append(nome)
+    return ", ".join(itens)
+
+
+def _formatar_rostos_camera(rostos: List[Dict], catalogo: Optional[Dict[str, dict]] = None) -> str:
+    if not rostos:
+        return ""
+    conhecidos, desconhecidos = _rostos_unicos(rostos)
+    partes = []
+    for r in conhecidos:
+        nome = r.get('nome', '?')
+        rel = None
+        if catalogo:
+            rel = catalogo.get(nome.lower(), {}).get('relacao')
+        partes.append(f"{nome} ({rel})" if rel else nome)
+    if desconhecidos > 0:
+        s = "s" if desconhecidos > 1 else ""
+        partes.append(f"{desconhecidos} rosto{s} desconhecido{s}")
+    return ", ".join(partes)
+
+
+def _formatar_catalogo_banco(catalogo: Optional[Dict[str, dict]]) -> str:
+    if not catalogo:
+        return ""
+    nomes_relacoes = [
+        f"{v.get('nome', '?')} ({v.get('relacao', 'sem relação definida')})"
+        for v in catalogo.values() if v.get('nome')
+    ]
+    return ", ".join(nomes_relacoes) if nomes_relacoes else ""
+
+
+def _montar_system_prompt_voz(
+    deteccoes: List[Dict],
+    rostos: List[Dict],
+    catalogo: Optional[Dict[str, dict]] = None,
+) -> str:
+    objetos_str = _formatar_objetos_camera(deteccoes)
+    rostos_visiveis_str = _formatar_rostos_camera(rostos, catalogo)
+    catalogo_str = _formatar_catalogo_banco(catalogo)
+    total_banco = len(catalogo) if catalogo else 0
+    tem_cadastrados = total_banco > 0
+    tem_rostos_agora = bool(rostos)
+
+    return f"""Você é o Specula, assistente de visão computacional com memória de pessoas.
+Sua resposta será lida em voz alta — máximo 2 frases curtas, português brasileiro, direto ao ponto.
+Nunca mencione porcentagens na resposta. Nunca invente objetos ou pessoas fora do contexto abaixo.
+
+## O que a câmera está vendo agora
+{objetos_str if objetos_str else "Nenhum objeto detectado no momento."}
+
+## Rostos reconhecidos neste momento
+{rostos_visiveis_str if rostos_visiveis_str else "Nenhum rosto reconhecido no frame atual."}
+
+## Pessoas que você conhece (cadastradas no banco)
+Total: {total_banco}
+{catalogo_str if catalogo_str else "Nenhuma pessoa cadastrada ainda."}
+
+## Estado do sistema
+- Pessoas cadastradas: {"sim" if tem_cadastrados else "não"} ({total_banco} no banco)
+- Rostos visíveis agora: {"sim" if tem_rostos_agora else "não"}
+
+Responda de forma natural e direta. Use o contexto completo acima para entender o que o usuário quer saber — seja sobre o que está na câmera agora, sobre quem você conhece no banco, ou sobre qualquer combinação disso."""
+
+
 def gerar_resposta_voz(
     pergunta: str,
     deteccoes: List[Dict],
@@ -510,10 +585,6 @@ def gerar_resposta_voz(
         if memoria and resposta:
             memoria.adicionar_turno(pergunta, resposta, deteccoes, rostos)
         return _limpar_resposta_fala(resposta), sug
-
-    resp = _responder_listagem_rostos(pergunta, catalogo)
-    if resp:
-        return _gravar(resp)
 
     resp = _responder_perigo(pergunta, deteccoes)
     if resp:
@@ -534,8 +605,11 @@ def gerar_resposta_voz(
     if resposta_direta:
         return _gravar(resposta_direta)
 
-    if not deteccoes and not rostos and intencao in (
-        IntencaoPergunta.CENA_GERAL, IntencaoPergunta.CENA_EXCLUSAO, IntencaoPergunta.DESCRICAO,
+    if (
+        not deteccoes and not rostos and not catalogo
+        and intencao in (
+            IntencaoPergunta.CENA_GERAL, IntencaoPergunta.CENA_EXCLUSAO, IntencaoPergunta.DESCRICAO,
+        )
     ):
         return _gravar(random.choice(FALLBACKS_SEM_DETECCOES))
 
@@ -568,10 +642,11 @@ def gerar_resposta_voz(
     )
 
     historico = memoria.contexto_para_glm() if memoria else []
+    system_prompt = _montar_system_prompt_voz(deteccoes, rostos, catalogo)
 
     resposta = glm_chat(
         messages=[
-            {'role': 'system', 'content': SYSTEM_PROMPT_VOZ},
+            {'role': 'system', 'content': system_prompt},
             *historico,
             {'role': 'user', 'content': user_content},
         ],
@@ -1134,7 +1209,9 @@ def processar_pergunta_voz(
 
     # ── Resposta principal (GLM + memória) ────────────────────────────
     if resposta is None:
-        catalogo = occhio.face_registry.get_catalogo() if occhio.face_registry else None
+        catalogo = None
+        if occhio.face_registry:
+            catalogo = occhio.face_registry.get_catalogo()
         resposta, sugestao = gerar_resposta_voz(
             transcricao,
             deteccoes_atuais,
