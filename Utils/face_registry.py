@@ -310,8 +310,11 @@ class FaceRegistry:
         for face in faces:
             fn = face.get('nome', '').lower()
             if nome_busca in fn or fn in nome_busca:
-                if hasattr(self.face_store, 'delete_face'):
-                    if self.face_store.delete_face(face['id']):
+                if hasattr(self.face_store, 'delete_face_by_id'):
+                    if self.face_store.delete_face_by_id(face['id']):
+                        removidos += 1
+                elif hasattr(self.face_store, 'delete_face'):
+                    if self.face_store.delete_face(face.get('nome', '')):
                         removidos += 1
         if removidos:
             self.recarregar_rostos()

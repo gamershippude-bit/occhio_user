@@ -227,15 +227,13 @@ class YOLODetector:
             # Pós-processamento
             detections = self._post_process_detections(detections)
             
-            # Log dos resultados
+            # Log dos resultados — só quando há detecção
             if detections:
                 logger.info(f"🔍 YOLO detectou {len(detections)} objetos válidos")
                 for i, det in enumerate(detections[:3]):  # Mostrar apenas 3 principais
                     bbox = det['bbox']
                     logger.info(f"   [{i+1}] {det['class']}: {det['confidence']:.3f} "
                               f"at ({bbox['x']}, {bbox['y']}) {bbox['width']}x{bbox['height']}")
-            else:
-                logger.info("🔍 Nenhum objeto detectado")
             
             return detections
             

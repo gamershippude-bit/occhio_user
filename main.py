@@ -534,6 +534,89 @@ def _formatar_catalogo_banco(catalogo: Optional[Dict[str, dict]]) -> str:
     return ", ".join(nomes_relacoes) if nomes_relacoes else ""
 
 
+def _formatar_catalogo_detalhado(catalogo: Optional[Dict[str, dict]]) -> str:
+    if not catalogo:
+        return "Nenhuma pessoa cadastrada."
+    linhas = []
+    for v in catalogo.values():
+        nome = v.get('nome', '?')
+        relacao = v.get('relacao', 'sem relação')
+        avisar = 'sim' if v.get('avisar') else 'não'
+        linhas.append(f'- {nome} | relação: {relacao} | avisar: {avisar}')
+    return '\n'.join(linhas) if linhas else 'Nenhuma pessoa cadastrada.'
+
+
+def executar_acao_banco(acao: dict, occhio) -> str:
+    tipo = acao.get('tipo')
+    nome_atual = acao.get('nome_atual', '')
+    novo_valor = acao.get('novo_valor', '')
+
+    store = occhio.face_registry.face_store if occhio.face_registry else None
+    if not store:
+        return 'erro: sem acesso ao banco'
+
+    ok = False
+    if tipo == 'renomear':
+        ok = store.rename_face(nome_atual, novo_valor)
+    elif tipo == 'deletar':
+        ok = store.delete_face(nome_atual)
+    elif tipo == 'atualizar_relacao':
+        ok = store.update_relacao(nome_atual, novo_valor)
+    elif tipo == 'atualizar_aviso':
+        ok = store.update_aviso(
+            nome_atual,
+            str(novo_valor).lower() in ('sim', 'true', '1', 's', 'yes'),
+        )
+    else:
+        return 'erro: tipo de ação desconhecido'
+
+    if ok and occhio.face_registry:
+        occhio.face_registry.recarregar_rostos()
+
+    return 'ok' if ok else 'não encontrado'
+
+
+def _processar_resposta_glm_acao(resposta: str, occhio) -> str:
+    """Separa AÇÃO/FALA do GLM, executa escrita no banco e retorna só o texto falado."""
+    texto = (resposta or '').strip()
+    if not re.match(r'^A[CÇ]ÃO:', texto, re.IGNORECASE):
+        return _limpar_resposta_fala(texto)
+
+    try:
+        partes = re.split(r'\n\s*FALA:\s*', texto, maxsplit=1, flags=re.IGNORECASE)
+        if len(partes) < 2:
+            match = re.match(
+                r'^A[CÇ]ÃO:\s*(\{.*?\})\s*(?:\n\s*)?(?:FALA:\s*)?(.*)$',
+                texto,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if not match:
+                return _limpar_resposta_fala('Não consegui processar essa solicitação.')
+            acao_json_str, fala = match.group(1).strip(), match.group(2).strip()
+        else:
+            acao_json_str = re.sub(r'^A[CÇ]ÃO:\s*', '', partes[0], flags=re.IGNORECASE).strip()
+            fala = partes[1].strip()
+
+        acao = json.loads(acao_json_str)
+        resultado = executar_acao_banco(acao, occhio)
+        logger.info('🗄️ Ação banco: %s → %s', acao, resultado)
+
+        if fala:
+            return _limpar_resposta_fala(fala)
+        if resultado == 'ok':
+            return 'Pronto, alteração feita.'
+        if resultado == 'não encontrado':
+            return 'Não encontrei essa pessoa no cadastro.'
+        return 'Não consegui fazer essa alteração agora.'
+    except Exception as e:
+        logger.error('Erro ao processar ação GLM: %s', e)
+        if re.search(r'FALA:\s*', texto, re.IGNORECASE):
+            fala = re.split(r'FALA:\s*', texto, maxsplit=1, flags=re.IGNORECASE)[-1].strip()
+            if fala:
+                return _limpar_resposta_fala(fala)
+        return _limpar_resposta_fala('Não consegui processar essa solicitação.')
+
+
 def _montar_system_prompt_voz(
     deteccoes: List[Dict],
     rostos: List[Dict],
@@ -541,7 +624,7 @@ def _montar_system_prompt_voz(
 ) -> str:
     objetos_str = _formatar_objetos_camera(deteccoes)
     rostos_visiveis_str = _formatar_rostos_camera(rostos, catalogo)
-    catalogo_str = _formatar_catalogo_banco(catalogo)
+    catalogo_detalhado = _formatar_catalogo_detalhado(catalogo)
     total_banco = len(catalogo) if catalogo else 0
     tem_cadastrados = total_banco > 0
     tem_rostos_agora = bool(rostos)
@@ -556,15 +639,27 @@ Nunca mencione porcentagens na resposta. Nunca invente objetos ou pessoas fora d
 ## Rostos reconhecidos neste momento
 {rostos_visiveis_str if rostos_visiveis_str else "Nenhum rosto reconhecido no frame atual."}
 
-## Pessoas que você conhece (cadastradas no banco)
+## Pessoas cadastradas no banco
 Total: {total_banco}
-{catalogo_str if catalogo_str else "Nenhuma pessoa cadastrada ainda."}
+{catalogo_detalhado}
+
+## Ações que você pode executar quando o usuário pedir
+- Renomear uma pessoa: muda o nome no banco
+- Deletar uma pessoa: remove do banco permanentemente
+- Atualizar relação: muda como a pessoa é classificada (amigo, familiar, colega…)
+- Atualizar aviso: ativa ou desativa o alerta quando a pessoa aparecer na câmera
+
+Quando o usuário pedir para modificar, renomear, deletar ou atualizar dados de uma pessoa cadastrada, responda SEMPRE neste formato exato:
+AÇÃO: {{"tipo": "renomear" | "deletar" | "atualizar_relacao" | "atualizar_aviso", "nome_atual": "nome no banco", "novo_valor": "novo valor"}}
+FALA: <o que dizer ao usuário em voz alta, confirmando o que foi feito>
+
+Para qualquer outra pergunta que não envolva modificar o banco, responda normalmente sem o prefixo AÇÃO.
 
 ## Estado do sistema
 - Pessoas cadastradas: {"sim" if tem_cadastrados else "não"} ({total_banco} no banco)
 - Rostos visíveis agora: {"sim" if tem_rostos_agora else "não"}
 
-Responda de forma natural e direta. Use o contexto completo acima para entender o que o usuário quer saber — seja sobre o que está na câmera agora, sobre quem você conhece no banco, ou sobre qualquer combinação disso."""
+Responda de forma natural e direta. Use o contexto completo acima para entender o que o usuário quer saber — seja sobre o que está na câmera agora, sobre quem você conhece no banco, ou sobre qualquer combinação disso. Quando executar uma ação, confirme o que foi feito na resposta falada (campo FALA)."""
 
 
 def gerar_resposta_voz(
@@ -575,6 +670,7 @@ def gerar_resposta_voz(
     catalogo: Optional[Dict[str, dict]] = None,
     face_registry: Optional[FaceRegistry] = None,
     cadastro_sessao: Optional[CadastroSessao] = None,
+    occhio=None,
 ) -> tuple:
     """
     Pipeline principal de geração de resposta.
@@ -652,11 +748,12 @@ def gerar_resposta_voz(
             *historico,
             {'role': 'user', 'content': user_content},
         ],
-        max_tokens=120,
+        max_tokens=200,
         temperature=0.4,
     )
 
-    resposta = _limpar_resposta_fala(resposta)
+    instancia = occhio or get_occhio_instance()
+    resposta = _processar_resposta_glm_acao(resposta, instancia)
 
     if memoria:
         memoria.adicionar_turno(pergunta, resposta, deteccoes, rostos)
@@ -1224,6 +1321,7 @@ def processar_pergunta_voz(
             catalogo=catalogo,
             face_registry=occhio.face_registry,
             cadastro_sessao=cadastro_sessao,
+            occhio=occhio,
         )
         if stream_state and sugestao:
             stream_state.sugestao_cadastro_pendente = True
@@ -1423,22 +1521,32 @@ def stream_ws(ws):
                         audio_alert = base64.b64encode(sintetizar_voz(msg)).decode('ascii')
                     except Exception:
                         pass
-                    ws.send(json.dumps({
-                        'tipo': 'alerta_pessoa',
-                        'nome': alerta.get('nome'),
-                        'mensagem': msg,
-                        'audio_b64': audio_alert,
-                    }))
-                ws.send(json.dumps(resultado))
+                    try:
+                        ws.send(json.dumps({
+                            'tipo': 'alerta_pessoa',
+                            'nome': alerta.get('nome'),
+                            'mensagem': msg,
+                            'audio_b64': audio_alert,
+                        }))
+                    except Exception:
+                        break
+                else:
+                    try:
+                        ws.send(json.dumps(resultado))
+                    except Exception:
+                        break
             except Exception as e:
                 logger.exception('Erro ao processar frame WebSocket')
-                ws.send(json.dumps({
-                    'erro': str(e),
-                    'deteccoes': [],
-                    'rostos': [],
-                    'total': 0,
-                    'ms': 0,
-                }))
+                try:
+                    ws.send(json.dumps({
+                        'erro': str(e),
+                        'deteccoes': [],
+                        'rostos': [],
+                        'total': 0,
+                        'ms': 0,
+                    }))
+                except Exception:
+                    break
                 continue
 
             frame_count += 1

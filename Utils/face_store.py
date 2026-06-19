@@ -104,6 +104,50 @@ class InMemoryFaceStore:
                 for r in self._rostos
             ]
 
+    def rename_face(self, nome_atual: str, novo_nome: str) -> bool:
+        """Renomeia uma pessoa cadastrada."""
+        with self._lock:
+            for r in self._rostos:
+                if r['nome'].lower() == nome_atual.strip().lower():
+                    r['nome'] = novo_nome.strip()
+                    r['label'] = novo_nome.strip()
+                    logger.info(f"✏️ Rosto renomeado em memória: '{nome_atual}' → '{novo_nome}'")
+                    return True
+        return False
+
+    def delete_face(self, nome: str) -> bool:
+        """Remove uma pessoa pelo nome."""
+        with self._lock:
+            antes = len(self._rostos)
+            self._rostos = [
+                r for r in self._rostos
+                if r['nome'].lower() != nome.strip().lower()
+            ]
+            if len(self._rostos) < antes:
+                logger.info(f"🗑️ Rosto removido da memória: '{nome}'")
+                return True
+        return False
+
+    def update_relacao(self, nome: str, nova_relacao: str) -> bool:
+        """Atualiza a relação de uma pessoa cadastrada."""
+        with self._lock:
+            for r in self._rostos:
+                if r['nome'].lower() == nome.strip().lower():
+                    r['relacao'] = nova_relacao.strip()
+                    logger.info(f"✏️ Relação atualizada em memória: '{nome}' → '{nova_relacao}'")
+                    return True
+        return False
+
+    def update_aviso(self, nome: str, avisar: bool) -> bool:
+        """Atualiza se deve avisar quando a pessoa aparecer."""
+        with self._lock:
+            for r in self._rostos:
+                if r['nome'].lower() == nome.strip().lower():
+                    r['avisar'] = avisar
+                    logger.info(f"✏️ Aviso atualizado em memória: '{nome}' → avisar={avisar}")
+                    return True
+        return False
+
 
 def criar_face_store():
     """Conecta ao MySQL (tabela user_rec_facial) ou usa memória se DB_HOST ausente."""

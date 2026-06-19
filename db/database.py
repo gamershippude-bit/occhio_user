@@ -260,8 +260,54 @@ class DatabaseManager:
                 logger.error(f"❌ Erro ao listar faces: {e}")
                 return []
 
-    def delete_face(self, face_id: int) -> bool:
-        """Remove uma face do banco."""
+    def rename_face(self, nome_atual: str, novo_nome: str) -> bool:
+        """Renomeia uma pessoa cadastrada."""
+        with self._lock:
+            try:
+                cursor = self._get_cursor()
+                cursor.execute(
+                    """
+                    UPDATE user_rec_facial
+                    SET imgNome = %s, imgLabel = %s
+                    WHERE LOWER(imgNome) = LOWER(%s)
+                    """,
+                    (novo_nome.strip(), novo_nome.strip(), nome_atual.strip()),
+                )
+                affected = cursor.rowcount
+                self.conn.commit()
+                cursor.close()
+                if affected > 0:
+                    logger.info(f"✏️ Rosto renomeado: '{nome_atual}' → '{novo_nome}'")
+                return affected > 0
+            except Exception as e:
+                logger.error(f"❌ Erro ao renomear rosto: {e}")
+                if self.conn:
+                    self.conn.rollback()
+                return False
+
+    def delete_face(self, nome: str) -> bool:
+        """Remove uma pessoa do banco pelo nome."""
+        with self._lock:
+            try:
+                cursor = self._get_cursor()
+                cursor.execute(
+                    "DELETE FROM user_rec_facial WHERE LOWER(imgNome) = LOWER(%s)",
+                    (nome.strip(),),
+                )
+                affected = cursor.rowcount
+                self.conn.commit()
+                cursor.close()
+                if affected > 0:
+                    logger.info(f"🗑️ Rosto removido: '{nome}'")
+                return affected > 0
+            except Exception as e:
+                logger.error(f"❌ Erro ao remover rosto por nome: {e}")
+                if self.conn:
+                    self.conn.rollback()
+                return False
+
+    def delete_face_by_id(self, face_id: int) -> bool:
+        """Remove uma face do banco pelo ID."""
         with self._lock:
             try:
                 cursor = self._get_cursor()
@@ -273,12 +319,61 @@ class DatabaseManager:
                 if affected_rows > 0:
                     logger.info(f"🗑️ Face {face_id} removida com sucesso")
                     return True
-                else:
-                    logger.warning(f"⚠️ Face {face_id} não encontrada")
-                    return False
-                    
+                logger.warning(f"⚠️ Face {face_id} não encontrada")
+                return False
+
             except Exception as e:
                 logger.error(f"❌ Erro ao remover face: {e}")
+                if self.conn:
+                    self.conn.rollback()
+                return False
+
+    def update_relacao(self, nome: str, nova_relacao: str) -> bool:
+        """Atualiza a relação de uma pessoa cadastrada."""
+        with self._lock:
+            try:
+                cursor = self._get_cursor()
+                cursor.execute(
+                    """
+                    UPDATE user_rec_facial
+                    SET imgRelacao = %s
+                    WHERE LOWER(imgNome) = LOWER(%s)
+                    """,
+                    (nova_relacao.strip(), nome.strip()),
+                )
+                affected = cursor.rowcount
+                self.conn.commit()
+                cursor.close()
+                if affected > 0:
+                    logger.info(f"✏️ Relação atualizada: '{nome}' → '{nova_relacao}'")
+                return affected > 0
+            except Exception as e:
+                logger.error(f"❌ Erro ao atualizar relação: {e}")
+                if self.conn:
+                    self.conn.rollback()
+                return False
+
+    def update_aviso(self, nome: str, avisar: bool) -> bool:
+        """Atualiza se deve avisar quando a pessoa aparecer."""
+        with self._lock:
+            try:
+                cursor = self._get_cursor()
+                cursor.execute(
+                    """
+                    UPDATE user_rec_facial
+                    SET avisar = %s
+                    WHERE LOWER(imgNome) = LOWER(%s)
+                    """,
+                    (1 if avisar else 0, nome.strip()),
+                )
+                affected = cursor.rowcount
+                self.conn.commit()
+                cursor.close()
+                if affected > 0:
+                    logger.info(f"✏️ Aviso atualizado: '{nome}' → avisar={avisar}")
+                return affected > 0
+            except Exception as e:
+                logger.error(f"❌ Erro ao atualizar aviso: {e}")
                 if self.conn:
                     self.conn.rollback()
                 return False
