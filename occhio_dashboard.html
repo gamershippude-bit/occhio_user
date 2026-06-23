@@ -1,15 +1,14 @@
 ﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#080c10" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <title>Specula â€” Assistente de VisÃ£o</title>
+  <title>Specula — Assistente de Visão</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-  <!--TESSSSTTEEEE-->
   <style>
     :root {
       --bg:        #080c10;
@@ -462,7 +461,7 @@
 </head>
 <body>
 
-<div id="a11y-status" class="a11y-status" role="status" aria-live="polite">Iniciando assistenteâ€¦</div>
+<div id="a11y-status" class="a11y-status" role="status" aria-live="polite">Iniciando assistente…</div>
 
 <header>
   <div class="logo">
@@ -482,7 +481,7 @@
     </div>
     <div class="pill" id="cam-pill">
       <span class="dot"></span>
-      <span class="pill-text-long" id="cam-label">CÃ¢mera inativa</span>
+      <span class="pill-text-long" id="cam-label">Câmera inativa</span>
       <span class="pill-text-short">Cam</span>
     </div>
   </div>
@@ -497,22 +496,22 @@
         <circle cx="32" cy="34" r="4" fill="#64748b"/>
         <rect x="22" y="10" width="20" height="8" rx="2" stroke="#64748b" stroke-width="2"/>
       </svg>
-      <span>Aguardando permissÃ£o da cÃ¢mera e microfoneâ€¦</span>
+      <span>Aguardando permissão da câmera e microfone…</span>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
     <canvas id="canvas" aria-hidden="true"></canvas>
 
-    <button class="btn-camera-switch" id="btn-switch-cam" aria-label="Alternar cÃ¢mera" title="CÃ¢mera frontal">ðŸ¤³</button>
+    <button class="btn-camera-switch" id="btn-switch-cam" aria-label="Alternar câmera" title="Câmera frontal">🤳</button>
   </div>
 
   <aside class="sidebar">
     <div class="permission-error" id="permission-error" role="alert">
-      Por favor, permita o acesso Ã  cÃ¢mera e microfone para usar o assistente.
+      Por favor, permita o acesso à câmera e microfone para usar o assistente.
     </div>
 
     <div class="sidebar-header">
-      <div class="sidebar-title">DetecÃ§Ãµes</div>
+      <div class="sidebar-title">Detecções</div>
       <div class="sidebar-count">
         <span id="total-count">0</span>
         <small> objetos</small>
@@ -520,24 +519,24 @@
     </div>
 
     <div class="controls">
-      <button class="btn btn-danger" id="btn-stop" disabled>â–  Parar assistente</button>
-      <button class="btn btn-secondary" id="btn-switch-cam-sidebar" style="display:none">ðŸ¤³ CÃ¢mera frontal</button>
+      <button class="btn btn-primary" id="btn-toggle">▶ Iniciar assistente</button>
+      <button class="btn btn-secondary" id="btn-switch-cam-sidebar" style="display:none">🤳 Câmera frontal</button>
     </div>
 
     <div class="voice-panel active" id="voice-panel">
       <div class="voice-box">
         <div class="voice-box-label">Sua pergunta</div>
-        <div class="voice-box-text empty" id="transcricao-text">â€”</div>
+        <div class="voice-box-text empty" id="transcricao-text">—</div>
       </div>
       <div class="voice-box">
         <div class="voice-box-label">Resposta</div>
-        <div class="voice-box-text empty" id="resposta-text">â€”</div>
+        <div class="voice-box-text empty" id="resposta-text">—</div>
       </div>
     </div>
 
     <div class="detections-list" id="det-list">
       <div class="empty-state">
-        Nenhuma detecÃ§Ã£o ainda.<br/>O assistente iniciarÃ¡ automaticamente.
+        Nenhuma detecção ainda.<br/>O assistente iniciará automaticamente.
       </div>
     </div>
   </aside>
@@ -556,9 +555,9 @@ const MIN_GRAVACAO_MS = 800;
 
 const NOMES_PT = {
   person: 'pessoa', chair: 'cadeira', table: 'mesa', laptop: 'computador',
-  tv: 'televisÃ£o', 'cell phone': 'celular', book: 'livro', bottle: 'garrafa',
+  tv: 'televisão', 'cell phone': 'celular', book: 'livro', bottle: 'garrafa',
   cup: 'copo', car: 'carro', bicycle: 'bicicleta', dog: 'cachorro', cat: 'gato',
-  keyboard: 'teclado', mouse: 'mouse', couch: 'sofÃ¡', bed: 'cama',
+  keyboard: 'teclado', mouse: 'mouse', couch: 'sofá', bed: 'cama',
   'dining table': 'mesa', backpack: 'mochila', handbag: 'bolsa',
 };
 
@@ -637,6 +636,8 @@ let processandoVoz = false;
 let servidorVozOcupada = false;
 let audioQueue = [];
 let audioPlaying = false;
+let isRunning = false;
+let wsReconnectTimer = null;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -644,7 +645,7 @@ const ctx = canvas.getContext('2d');
 const placeholder = document.getElementById('placeholder');
 const detList = document.getElementById('det-list');
 const totalCount = document.getElementById('total-count');
-const btnStop = document.getElementById('btn-stop');
+const btnToggle = document.getElementById('btn-toggle');
 const btnSwitchCam = document.getElementById('btn-switch-cam');
 const btnSwitchCamSidebar = document.getElementById('btn-switch-cam-sidebar');
 const wsPill = document.getElementById('ws-pill');
@@ -675,8 +676,28 @@ function tentarRetomarVad() {
   }
 }
 
+function atualizarBotaoToggle() {
+  if (isRunning) {
+    btnToggle.textContent = '■ Parar assistente';
+    btnToggle.classList.remove('btn-primary');
+    btnToggle.classList.add('btn-danger');
+    btnToggle.disabled = false;
+  } else {
+    btnToggle.textContent = '▶ Iniciar assistente';
+    btnToggle.classList.remove('btn-danger');
+    btnToggle.classList.add('btn-primary');
+    btnToggle.disabled = false;
+  }
+}
+
 function conectarWS() {
+  if (!isRunning) return;
   if (ws && ws.readyState < 2) return;
+
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
 
   ws = new WebSocket(WS_URL);
 
@@ -740,13 +761,13 @@ function conectarWS() {
       totalCount.textContent = lastDeteccoes.length;
       atualizarListaDeteccoes(lastDeteccoes);
     } catch (e) {
-      /* resposta invÃ¡lida */
+      /* resposta inválida */
     }
   };
 
   ws.onerror = () => {
     wsPill.classList.remove('live');
-    wsLabel.textContent = 'Erro de conexÃ£o';
+    wsLabel.textContent = 'Erro de conexão';
   };
 
   ws.onclose = () => {
@@ -754,13 +775,18 @@ function conectarWS() {
     wsPill.classList.remove('live');
     wsLabel.textContent = 'Desconectado';
     pausarVad();
-    if (stream) setTimeout(conectarWS, 2000);
+    ws = null;
+    if (isRunning) {
+      wsReconnectTimer = setTimeout(conectarWS, 3000);
+    }
   };
 }
 
-async function iniciarAssistente() {
+async function startAssistant() {
+  if (isRunning) return;
+
   permissionError.classList.remove('visible');
-  setA11yStatus('Solicitando acesso Ã  cÃ¢mera e microfoneâ€¦');
+  setA11yStatus('Solicitando acesso à câmera e microfone…');
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -771,12 +797,15 @@ async function iniciarAssistente() {
     video.srcObject = stream;
     await video.play();
 
+    isRunning = true;
+    vadPausado = false;
+
     camPill.classList.add('live');
     atualizarLabelCamera();
     placeholder.style.display = 'none';
-    btnStop.disabled = false;
     btnSwitchCam.classList.add('visible');
     btnSwitchCamSidebar.style.display = 'block';
+    atualizarBotaoToggle();
 
     conectarWS();
     iniciarRenderLoop();
@@ -787,48 +816,76 @@ async function iniciarAssistente() {
     }
     setA11yStatus('Ouvindo...');
   } catch (e) {
+    isRunning = false;
+    atualizarBotaoToggle();
     permissionError.classList.add('visible');
-    setA11yStatus('Por favor, permita o acesso Ã  cÃ¢mera e microfone para usar o assistente.');
+    setA11yStatus('Erro ao acessar câmera/microfone. Verifique as permissões.');
     placeholder.style.display = 'flex';
     placeholder.querySelector('span').textContent =
-      'Por favor, permita o acesso Ã  cÃ¢mera e microfone para usar o assistente.';
+      'Por favor, permita o acesso à câmera e microfone para usar o assistente.';
   }
+}
+
+async function iniciarAssistente() {
+  await startAssistant();
 }
 
 function atualizarLabelCamera() {
   const frontal = facingMode === 'user';
-  const label = frontal ? 'CÃ¢mera frontal' : 'CÃ¢mera traseira';
+  const label = frontal ? 'Câmera frontal' : 'Câmera traseira';
   camLabel.textContent = label;
-  btnSwitchCam.title = frontal ? 'Usar cÃ¢mera traseira' : 'Usar cÃ¢mera frontal';
+  btnSwitchCam.title = frontal ? 'Usar câmera traseira' : 'Usar câmera frontal';
   btnSwitchCam.setAttribute('aria-label', btnSwitchCam.title);
-  btnSwitchCamSidebar.textContent = frontal ? 'ðŸ“· CÃ¢mera traseira' : 'ðŸ¤³ CÃ¢mera frontal';
+  btnSwitchCamSidebar.textContent = frontal ? '📷 Câmera traseira' : '🤳 Câmera frontal';
 }
 
 async function trocarCamera() {
-  if (!stream) return;
-  facingMode = facingMode === 'environment' ? 'user' : 'environment';
-  cancelarGravacaoVAD();
-  pararVAD();
-  if (sendLoop) { clearInterval(sendLoop); sendLoop = null; }
-  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  stream.getTracks().forEach(t => t.stop());
-  stream = null;
-  await iniciarAssistente();
+  if (!stream || !isRunning) return;
+  const novoModo = facingMode === 'environment' ? 'user' : 'environment';
+  stopAssistant();
+  facingMode = novoModo;
+  await startAssistant();
 }
 
-function pararAssistente() {
+function stopAssistant() {
+  isRunning = false;
+
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+
   cancelarGravacaoVAD();
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try { mediaRecorder.stop(); } catch (e) { /* ignore */ }
+  }
+  mediaRecorder = null;
+
   pararVAD();
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   if (sendLoop) { clearInterval(sendLoop); sendLoop = null; }
-  if (ws) { ws.close(); ws = null; }
+  if (frameTimeout) { clearTimeout(frameTimeout); frameTimeout = null; }
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+    ws = null;
+  }
+  wsReady = false;
 
   audioQueue = [];
   audioPlaying = false;
   processandoVoz = false;
   servidorVozOcupada = false;
   vadPausado = true;
+  gravando = false;
+  falaDetectada = false;
+  silencioInicio = null;
+  audioChunks = [];
+  aguardandoFrame = false;
 
   video.srcObject = null;
   lastDeteccoesRaw = [];
@@ -838,20 +895,33 @@ function pararAssistente() {
   rostAlvo = [];
   detRender = [];
   rostRender = [];
-  aguardandoFrame = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   camPill.classList.remove('live');
   camLabel.textContent = 'Inativo';
+  wsPill.classList.remove('live');
+  wsLabel.textContent = 'Desconectado';
   btnSwitchCam.classList.remove('visible');
   btnSwitchCamSidebar.style.display = 'none';
   facingMode = 'environment';
   placeholder.style.display = 'flex';
   placeholder.querySelector('span').textContent = 'Assistente parado.';
-  btnStop.disabled = true;
   totalCount.textContent = '0';
   detList.innerHTML = '<div class="empty-state">Assistente parado.</div>';
+  atualizarBotaoToggle();
   setA11yStatus('Assistente parado.');
+}
+
+function pararAssistente() {
+  stopAssistant();
+}
+
+function toggleAssistant() {
+  if (isRunning) {
+    stopAssistant();
+  } else {
+    startAssistant();
+  }
 }
 
 function iniciarRenderLoop() {
@@ -943,7 +1013,7 @@ function atualizarListaDeteccoes(dets) {
   const sorted = Object.values(mapa).sort((a, b) => b.conf - a.conf);
   detList.innerHTML = sorted.map(d => {
     const cor = classColor(d.nome);
-    const qtd = d.qtd > 1 ? ` Ã—${d.qtd}` : '';
+    const qtd = d.qtd > 1 ? ` ×${d.qtd}` : '';
     return `
       <div class="det-item">
         <div class="det-color" style="background:${cor}"></div>
@@ -1094,7 +1164,7 @@ function enviarAudio() {
   servidorVozOcupada = true;
   pausarVad();
   setA11yStatus('Processando...');
-  respostaText.textContent = 'Processandoâ€¦';
+  respostaText.textContent = 'Processando…';
   respostaText.classList.add('empty');
 
   const reader = new FileReader();
@@ -1143,14 +1213,14 @@ function reproduzirProximoAudio() {
   });
 }
 
-btnStop.addEventListener('click', pararAssistente);
+btnToggle.addEventListener('click', toggleAssistant);
 btnSwitchCam.addEventListener('click', trocarCamera);
 btnSwitchCamSidebar.addEventListener('click', trocarCamera);
-window.addEventListener('beforeunload', pararAssistente);
+window.addEventListener('beforeunload', stopAssistant);
 
 document.addEventListener('DOMContentLoaded', () => {
-  conectarWS();
-  iniciarAssistente();
+  atualizarBotaoToggle();
+  startAssistant();
 });
 </script>
 </body>

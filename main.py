@@ -22,7 +22,7 @@ import base64
 import tempfile
 import signal
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_sock import Sock
 from typing import Dict, List, Any, Optional
 
@@ -1451,10 +1451,18 @@ def get_occhio_instance():
 # ROTAS FLASK — sem alterações
 # ─────────────────────────────────────────────
 
+@app.after_request
+def set_charset(response):
+    if response.content_type and 'text/html' in response.content_type:
+        response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
+
+
 @app.route('/')
 def dashboard():
     if DASHBOARD_HTML.exists():
-        return DASHBOARD_HTML.read_text(encoding='utf-8')
+        content = DASHBOARD_HTML.read_text(encoding='utf-8')
+        return Response(content, mimetype='text/html; charset=utf-8')
     return jsonify({'erro': 'Dashboard não encontrado'}), 404
 
 
