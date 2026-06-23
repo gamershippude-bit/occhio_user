@@ -799,15 +799,30 @@ def _montar_resposta_voz(
     }
 
 
-def _finalizar_resposta_voz(transcricao: str, resposta: str) -> dict:
+def _finalizar_resposta_voz(
+    transcricao: str,
+    resposta: str,
+    stream_state: Optional['_StreamState'] = None,
+) -> Optional[dict]:
+    if stream_state and stream_state.esta_cancelado():
+        return None
+
     resultado = _montar_resposta_voz(transcricao, resposta)
     audio_erro = None
+
+    if stream_state and stream_state.esta_cancelado():
+        return None
+
     try:
         audio_mp3 = sintetizar_voz(resultado['resposta'])
         resultado['audio_b64'] = base64.b64encode(audio_mp3).decode('ascii')
     except Exception as e:
         audio_erro = str(e)
         logger.error(f'ElevenLabs falhou (resposta em texto mantida): {e}')
+
+    if stream_state and stream_state.esta_cancelado():
+        return None
+
     resultado['audio_erro'] = audio_erro
     resultado['voz_ocupada'] = False
     return resultado
@@ -1284,11 +1299,17 @@ def processar_pergunta_voz(
             'voz_ocupada': False,
         }
 
+    if stream_state and stream_state.esta_cancelado():
+        return None
+
     logger.info('🎤 Transcrição: "%s"', transcricao)
 
     transcricao_atual = transcricao
     try:
         occhio = get_occhio_instance()
+
+        if stream_state and stream_state.esta_cancelado():
+            return None
 
         # ── Remoção pendente (confirmação) ──────────────────────────────
         if stream_state and stream_state.remocao_pendente:
@@ -1308,11 +1329,14 @@ def processar_pergunta_voz(
                 with stream_state.lock:
                     stream_state.historico_conversa.append({'role': 'user', 'content': transcricao_atual})
                     stream_state.historico_conversa.append({'role': 'assistant', 'content': msg})
-                return _finalizar_resposta_voz(transcricao_atual, msg)
+                return _finalizar_resposta_voz(transcricao_atual, msg, stream_state)
             if _eh_negacao(transcricao_atual):
                 stream_state.remocao_pendente = None
-                return _finalizar_resposta_voz(transcricao_atual, 'Ok, mantive o cadastro.')
+                return _finalizar_resposta_voz(transcricao_atual, 'Ok, mantive o cadastro.', stream_state)
             stream_state.remocao_pendente = None
+
+        if stream_state and stream_state.esta_cancelado():
+            return None
 
         # ── Nova intenção de remoção ────────────────────────────────────
         nome_remover = _detectar_intencao_remocao(transcricao_atual)
@@ -1322,7 +1346,10 @@ def processar_pergunta_voz(
             with stream_state.lock:
                 stream_state.historico_conversa.append({'role': 'user', 'content': transcricao_atual})
                 stream_state.historico_conversa.append({'role': 'assistant', 'content': msg})
-            return _finalizar_resposta_voz(transcricao_atual, msg)
+            return _finalizar_resposta_voz(transcricao_atual, msg, stream_state)
+
+        if stream_state and stream_state.esta_cancelado():
+            return None
 
         # ── GLM — uma única chamada com contexto completo ───────────────
         catalogo = occhio.face_registry.get_catalogo() if occhio.face_registry else None
@@ -1340,10 +1367,13 @@ def processar_pergunta_voz(
             occhio=occhio,
         )
 
+        if stream_state and stream_state.esta_cancelado():
+            return None
+
         with stream_state.lock:
             stream_state.historico_conversa.append({'role': 'assistant', 'content': resposta})
 
-        return _finalizar_resposta_voz(transcricao_atual, resposta)
+        return _finalizar_resposta_voz(transcricao_atual, resposta, stream_state)
 
     except Exception as e:
         logger.error(f'❌ Erro no pipeline de voz: {e}')
@@ -1353,9 +1383,12 @@ def processar_pergunta_voz(
             )
         except Exception:
             pass
+        if stream_state and stream_state.esta_cancelado():
+            return None
         return _finalizar_resposta_voz(
             transcricao_atual,
             'Ocorreu um erro interno. Pode repetir?',
+            stream_state,
         )
 
 
@@ -1370,6 +1403,21 @@ class _StreamState:
         self.voz_ocupada: bool = False
         self.historico_conversa: List[dict] = []
         self.remocao_pendente: Optional[str] = None
+        self.cancelado: bool = False
+
+    def solicitar_cancelamento_voz(self) -> None:
+        with self.lock:
+            self.cancelado = True
+            self.voz_ocupada = False
+            self.remocao_pendente = None
+
+    def esta_cancelado(self) -> bool:
+        with self.lock:
+            return self.cancelado
+
+    def limpar_cancelamento(self) -> None:
+        with self.lock:
+            self.cancelado = False
 
     def atualizar(self, frame_b64: str, deteccoes: list, rostos: list) -> None:
         with self.lock:
@@ -1408,6 +1456,10 @@ def _executar_voz_background(
             frame_b64=frame_b64,
             stream_state=stream_state,
         )
+        if resultado is None or stream_state.esta_cancelado():
+            stream_state.limpar_cancelamento()
+            logger.info('🛑 Pipeline de voz cancelado pelo usuário')
+            return
         try:
             ws.send(json.dumps({'tipo': 'resposta_voz', **resultado}))
         except Exception as send_err:
@@ -1509,6 +1561,10 @@ def stream_ws(ws):
                 ws.send(json.dumps({'erro': 'JSON inválido'}))
                 continue
 
+            if dados.get('tipo') == 'cancelar_processamento':
+                stream_state.solicitar_cancelamento_voz()
+                continue
+
             if dados.get('tipo') == 'pergunta_voz':
                 audio_b64 = dados.get('audio')
                 if not audio_b64:
@@ -1518,6 +1574,7 @@ def stream_ws(ws):
                         'voz_ocupada': False,
                     }))
                     continue
+                stream_state.limpar_cancelamento()
                 stream_state.set_voz_ocupada(True)
                 threading.Thread(
                     target=_executar_voz_background,

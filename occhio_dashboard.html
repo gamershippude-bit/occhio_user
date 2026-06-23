@@ -638,6 +638,17 @@ let audioQueue = [];
 let audioPlaying = false;
 let isRunning = false;
 let wsReconnectTimer = null;
+let currentAudio = null;
+let toneCtx = null;
+let keywordRecognition = null;
+let interruptionCooldownUntil = 0;
+
+const FRASES_PROCESSAMENTO = [
+  'Entendido, um momento.',
+  'Certo, processando.',
+  'Deixa eu ver.',
+  'Ok.',
+];
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -659,6 +670,152 @@ const permissionError = document.getElementById('permission-error');
 
 function setA11yStatus(texto) {
   a11yStatus.textContent = texto;
+}
+
+function getToneContext() {
+  if (!toneCtx || toneCtx.state === 'closed') {
+    toneCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (toneCtx.state === 'suspended') {
+    toneCtx.resume().catch(() => {});
+  }
+  return toneCtx;
+}
+
+function playAckTone() {
+  try {
+    const ctx = getToneContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 660;
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.2);
+  } catch (e) { /* ignore */ }
+}
+
+function playInterruptionBeep() {
+  try {
+    const ctx = getToneContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.15);
+  } catch (e) { /* ignore */ }
+}
+
+function speakProcessing() {
+  if (!window.speechSynthesis) return;
+  const frase = FRASES_PROCESSAMENTO[Math.floor(Math.random() * FRASES_PROCESSAMENTO.length)];
+  const utter = new SpeechSynthesisUtterance(frase);
+  utter.lang = 'pt-BR';
+  utter.rate = 1.1;
+  utter.pitch = 1.0;
+  const voices = window.speechSynthesis.getVoices();
+  const ptVoice = voices.find(v => v.lang && v.lang.startsWith('pt'));
+  if (ptVoice) utter.voice = ptVoice;
+  window.speechSynthesis.speak(utter);
+}
+
+function pararAudioResposta() {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch (e) { /* ignore */ }
+    currentAudio = null;
+  }
+  audioQueue = [];
+  audioPlaying = false;
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+function triggerInterruption() {
+  const agora = Date.now();
+  if (agora < interruptionCooldownUntil) return;
+  interruptionCooldownUntil = agora + 1500;
+
+  cancelarGravacaoVAD();
+  pararAudioResposta();
+
+  processandoVoz = false;
+  servidorVozOcupada = false;
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ tipo: 'cancelar_processamento' }));
+    } catch (e) { /* ignore */ }
+  }
+
+  vadPausado = false;
+  tentarRetomarVad();
+  playInterruptionBeep();
+  setA11yStatus('Ouvindo...');
+}
+
+function iniciarReconhecimentoPalavraChave() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition || keywordRecognition) return;
+
+  keywordRecognition = new SpeechRecognition();
+  keywordRecognition.lang = 'pt-BR';
+  keywordRecognition.continuous = true;
+  keywordRecognition.interimResults = true;
+
+  keywordRecognition.onresult = (event) => {
+    let transcript = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    if (transcript.toLowerCase().includes('specula')) {
+      triggerInterruption();
+    }
+  };
+
+  keywordRecognition.onerror = (event) => {
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      loggerKeywordWarn();
+    }
+  };
+
+  keywordRecognition.onend = () => {
+    if (isRunning && keywordRecognition) {
+      try {
+        keywordRecognition.start();
+      } catch (e) { /* ignore */ }
+    }
+  };
+
+  try {
+    keywordRecognition.start();
+  } catch (e) {
+    keywordRecognition = null;
+  }
+}
+
+function loggerKeywordWarn() {
+  /* palavra-chave indisponível — VAD principal continua */
+}
+
+function pararReconhecimentoPalavraChave() {
+  if (!keywordRecognition) return;
+  const rec = keywordRecognition;
+  keywordRecognition = null;
+  rec.onend = null;
+  try {
+    rec.stop();
+  } catch (e) { /* ignore */ }
 }
 
 function vadPodeMonitorar() {
@@ -732,6 +889,7 @@ function conectarWS() {
           respostaText.classList.remove('empty');
         }
         if (data.audio_b64) {
+          if (window.speechSynthesis) window.speechSynthesis.cancel();
           enfileirarAudio(data.audio_b64);
         } else {
           tentarRetomarVad();
@@ -746,6 +904,7 @@ function conectarWS() {
         }
         if (data.audio_b64 && !processandoVoz) {
           if (data.voz_ocupada) servidorVozOcupada = true;
+          if (window.speechSynthesis) window.speechSynthesis.cancel();
           enfileirarAudio(data.audio_b64);
         }
         return;
@@ -811,6 +970,7 @@ async function startAssistant() {
     iniciarRenderLoop();
     iniciarEnvioFrames();
     iniciarVAD();
+    iniciarReconhecimentoPalavraChave();
     if (audioContext && audioContext.state === 'suspended') {
       audioContext.resume().catch(() => {});
     }
@@ -856,6 +1016,8 @@ function stopAssistant() {
   }
 
   cancelarGravacaoVAD();
+  pararReconhecimentoPalavraChave();
+  pararAudioResposta();
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     try { mediaRecorder.stop(); } catch (e) { /* ignore */ }
   }
@@ -881,6 +1043,7 @@ function stopAssistant() {
   processandoVoz = false;
   servidorVozOcupada = false;
   vadPausado = true;
+  currentAudio = null;
   gravando = false;
   falaDetectada = false;
   silencioInicio = null;
@@ -1163,6 +1326,8 @@ function enviarAudio() {
   processandoVoz = true;
   servidorVozOcupada = true;
   pausarVad();
+  playAckTone();
+  speakProcessing();
   setA11yStatus('Processando...');
   respostaText.textContent = 'Processando…';
   respostaText.classList.add('empty');
@@ -1170,12 +1335,19 @@ function enviarAudio() {
   const reader = new FileReader();
   reader.onload = () => {
     const b64 = reader.result.split(',')[1];
-    ws.send(JSON.stringify({ tipo: 'pergunta_voz', audio: b64 }));
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ tipo: 'pergunta_voz', audio: b64 }));
+    } else {
+      processandoVoz = false;
+      servidorVozOcupada = false;
+      tentarRetomarVad();
+    }
   };
   reader.readAsDataURL(blob);
 }
 
 function enfileirarAudio(b64) {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
   audioQueue.push(b64);
   if (!audioPlaying) reproduzirProximoAudio();
 }
@@ -1183,6 +1355,7 @@ function enfileirarAudio(b64) {
 function reproduzirProximoAudio() {
   if (audioQueue.length === 0) {
     audioPlaying = false;
+    currentAudio = null;
     servidorVozOcupada = false;
     tentarRetomarVad();
     return;
@@ -1197,20 +1370,18 @@ function reproduzirProximoAudio() {
   const blob = new Blob([bytes], { type: 'audio/mp3' });
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
+  currentAudio = audio;
 
-  audio.onended = () => {
+  const proximo = () => {
     URL.revokeObjectURL(url);
-    reproduzirProximoAudio();
-  };
-  audio.onerror = () => {
-    URL.revokeObjectURL(url);
+    if (currentAudio === audio) currentAudio = null;
     reproduzirProximoAudio();
   };
 
-  audio.play().catch(() => {
-    URL.revokeObjectURL(url);
-    reproduzirProximoAudio();
-  });
+  audio.onended = proximo;
+  audio.onerror = proximo;
+
+  audio.play().catch(proximo);
 }
 
 btnToggle.addEventListener('click', toggleAssistant);
@@ -1219,6 +1390,10 @@ btnSwitchCamSidebar.addEventListener('click', trocarCamera);
 window.addEventListener('beforeunload', stopAssistant);
 
 document.addEventListener('DOMContentLoaded', () => {
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
   atualizarBotaoToggle();
   startAssistant();
 });
