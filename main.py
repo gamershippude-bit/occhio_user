@@ -788,12 +788,14 @@ def gerar_resposta_voz(
 def _montar_resposta_voz(
     transcricao: str,
     resposta: str,
+    voz_ocupada: bool = False,
 ) -> dict:
     return {
         'transcricao': transcricao,
         'resposta': _limpar_resposta_fala(resposta),
         'audio_b64': None,
         'cadastro_ativo': False,
+        'voz_ocupada': voz_ocupada,
     }
 
 
@@ -807,6 +809,7 @@ def _finalizar_resposta_voz(transcricao: str, resposta: str) -> dict:
         audio_erro = str(e)
         logger.error(f'ElevenLabs falhou (resposta em texto mantida): {e}')
     resultado['audio_erro'] = audio_erro
+    resultado['voz_ocupada'] = False
     return resultado
 
 
@@ -886,7 +889,7 @@ class OcchioCloud:
 
     def _criar_detector_local(self):
         class DetectorLocal:
-            def detectar_com_bbox(self, frame, confidence_threshold=0.5):
+            def detectar_com_bbox(self, frame, confidence_threshold=0.65):
                 return []
         return DetectorLocal()
 
@@ -968,7 +971,7 @@ class OcchioCloud:
             altura_imagem, largura_imagem = frame.shape[:2]
             deteccoes = []
             if self.detector_objetos and hasattr(self.detector_objetos, 'detectar_com_bbox'):
-                deteccoes_brutas = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=0.5)
+                deteccoes_brutas = self.detector_objetos.detectar_com_bbox(frame, confidence_threshold=0.65)
                 for i, det in enumerate(deteccoes_brutas):
                     caixa_normalizada = self._normalizar_coordenadas(det['bbox'], largura_imagem, altura_imagem)
                     deteccoes.append({
@@ -1112,8 +1115,9 @@ class OcchioCloud:
                 "erro": str(e)
             }
 
-    def processar_stream(self, dados_imagem: str, confidence_threshold: float = 0.45) -> Dict[str, Any]:
+    def processar_stream(self, dados_imagem: str, confidence_threshold: float = 0.65) -> Dict[str, Any]:
         """Processa frame para streaming WebSocket — objetos YOLO + rostos."""
+        confidence_threshold = max(confidence_threshold, 0.65)
         inicio = time.time()
         try:
             frame = self._decodificar_imagem(dados_imagem)
@@ -1251,9 +1255,10 @@ def processar_pergunta_voz(
     if len(audio_bytes) < 1200:
         return {
             'transcricao': '',
-            'resposta': 'Gravação muito curta. Segure o botão por pelo menos 1 segundo.',
+            'resposta': 'Gravação muito curta. Fale um pouco mais.',
             'audio_b64': None,
             'cadastro_ativo': False,
+            'voz_ocupada': False,
         }
 
     try:
@@ -1263,9 +1268,10 @@ def processar_pergunta_voz(
         if 'too short' in err.lower():
             return {
                 'transcricao': '',
-                'resposta': 'Gravação muito curta. Segure o botão por pelo menos 1 segundo.',
+                'resposta': 'Gravação muito curta. Fale um pouco mais.',
                 'audio_b64': None,
                 'cadastro_ativo': False,
+                'voz_ocupada': False,
             }
         raise
 
@@ -1275,6 +1281,7 @@ def processar_pergunta_voz(
             'resposta': 'Não consegui entender. Tente falar novamente.',
             'audio_b64': None,
             'cadastro_ativo': False,
+            'voz_ocupada': False,
         }
 
     logger.info('🎤 Transcrição: "%s"', transcricao)
@@ -1419,6 +1426,7 @@ def _executar_voz_background(
                 'resposta': 'Ocorreu um erro ao processar sua pergunta.',
                 'audio_b64': None,
                 'cadastro_ativo': False,
+                'voz_ocupada': False,
             }))
         except Exception:
             logger.warning('Não foi possível enviar erro de voz — cliente desconectado')
@@ -1499,6 +1507,7 @@ def stream_ws(ws):
                     ws.send(json.dumps({
                         'tipo': 'resposta_voz',
                         'erro': "Campo 'audio' não encontrado",
+                        'voz_ocupada': False,
                     }))
                     continue
                 stream_state.set_voz_ocupada(True)
@@ -1514,7 +1523,7 @@ def stream_ws(ws):
                 ws.send(json.dumps({'erro': "Campo 'frame' não encontrado"}))
                 continue
 
-            threshold = float(dados.get('threshold', 0.45))
+            threshold = max(float(dados.get('threshold', 0.65)), 0.65)
             try:
                 occhio = get_occhio_instance()
                 resultado = occhio.processar_stream(frame_b64, confidence_threshold=threshold)
@@ -1538,6 +1547,7 @@ def stream_ws(ws):
                             'nome': alerta.get('nome'),
                             'mensagem': msg,
                             'audio_b64': audio_alert,
+                            'voz_ocupada': bool(audio_alert),
                         }))
                     except Exception:
                         break

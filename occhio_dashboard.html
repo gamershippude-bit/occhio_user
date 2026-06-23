@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#080c10" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <title>Occhio — Visão em Tempo Real</title>
+  <title>Specula â€” Assistente de VisÃ£o</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
@@ -221,21 +221,31 @@
       border: 1px solid #ff6b3540;
     }
     .btn:disabled { opacity: 0.3; cursor: not-allowed; }
-    .btn-voice {
-      background: #7c3aed22;
-      color: #a78bfa;
-      border: 1px solid #7c3aed55;
+
+    .a11y-status {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
-    .btn-voice.recording {
-      background: #ff6b3522;
-      color: var(--warn);
-      border-color: #ff6b3540;
-      animation: recordPulse 1s infinite;
+
+    .permission-error {
+      padding: 16px 20px;
+      background: #ff6b3518;
+      border: 1px solid #ff6b3540;
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin: 16px;
+      display: none;
     }
-    @keyframes recordPulse {
-      0%, 100% { box-shadow: 0 0 0 0 #ff6b3540; }
-      50%       { box-shadow: 0 0 0 6px #ff6b3500; }
-    }
+    .permission-error.visible { display: block; }
 
     .voice-panel {
       padding: 12px 20px;
@@ -245,23 +255,6 @@
       gap: 10px;
     }
     .voice-panel.active { display: flex; }
-
-    .recording-indicator {
-      display: none;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.75rem;
-      color: var(--warn);
-      font-weight: 500;
-    }
-    .recording-indicator.active { display: flex; }
-    .recording-indicator .rec-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--warn);
-      animation: pulse 0.8s infinite;
-    }
 
     .voice-box {
       background: var(--bg);
@@ -284,115 +277,6 @@
       min-height: 1.2em;
     }
     .voice-box-text.empty { color: var(--muted); font-style: italic; }
-
-    .voice-hint {
-      font-size: 0.68rem;
-      color: var(--muted);
-      text-align: center;
-    }
-
-    /* Botão flutuante de voz (mobile) */
-    .voice-fab {
-      display: none;
-      position: absolute;
-      left: 50%;
-      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-      transform: translateX(-50%);
-      z-index: 50;
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      border: 2px solid #7c3aed88;
-      background: linear-gradient(145deg, #7c3aed, #5b21b6);
-      color: #fff;
-      font-size: 1.6rem;
-      line-height: 1;
-      cursor: pointer;
-      box-shadow: 0 4px 24px #7c3aed66, 0 2px 8px #00000088;
-      align-items: center;
-      justify-content: center;
-      touch-action: manipulation;
-      -webkit-user-select: none;
-      user-select: none;
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .voice-fab.visible { display: flex; }
-    .voice-fab:active { transform: translateX(-50%) scale(0.94); }
-    .voice-fab.recording {
-      background: linear-gradient(145deg, var(--warn), #c2410c);
-      border-color: #ff6b3588;
-      animation: fabPulse 1s infinite;
-    }
-    .voice-fab:disabled {
-      opacity: 0.45;
-      pointer-events: none;
-    }
-    .voice-fab-label {
-      display: none;
-      position: absolute;
-      left: 50%;
-      bottom: calc(88px + env(safe-area-inset-bottom, 0px));
-      transform: translateX(-50%);
-      z-index: 49;
-      font-size: 0.72rem;
-      font-weight: 600;
-      color: var(--text);
-      background: #000000cc;
-      border: 1px solid var(--border);
-      padding: 6px 14px;
-      border-radius: 100px;
-      white-space: nowrap;
-      pointer-events: none;
-    }
-    .voice-fab-label.visible { display: block; }
-    .voice-fab-label.recording { color: var(--warn); border-color: #ff6b3540; }
-
-    @keyframes fabPulse {
-      0%, 100% { box-shadow: 0 4px 24px #ff6b3566, 0 0 0 0 #ff6b3540; }
-      50%       { box-shadow: 0 4px 24px #ff6b3566, 0 0 0 12px #ff6b3500; }
-    }
-
-    .mobile-recording-bar {
-      display: none;
-      position: fixed;
-      top: calc(56px + env(safe-area-inset-top, 0px));
-      left: 0;
-      right: 0;
-      z-index: 150;
-      padding: 8px 16px;
-      background: #ff6b3522;
-      border-bottom: 1px solid #ff6b3540;
-      color: var(--warn);
-      font-size: 0.78rem;
-      font-weight: 600;
-      text-align: center;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-    .mobile-recording-bar.active { display: flex; }
-    .mobile-recording-bar .rec-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--warn);
-      animation: pulse 0.8s infinite;
-      flex-shrink: 0;
-    }
-
-    .slider-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 0.75rem;
-      color: var(--muted);
-    }
-
-    input[type=range] {
-      width: 100%;
-      accent-color: var(--accent);
-      margin-top: 4px;
-    }
 
     .detections-list {
       flex: 1;
@@ -465,27 +349,6 @@
       line-height: 1.6;
     }
 
-    .log-area {
-      border-top: 1px solid var(--border);
-      padding: 10px 20px;
-      max-height: 96px;
-      overflow-y: auto;
-    }
-
-    .log-area::-webkit-scrollbar { width: 3px; }
-    .log-area::-webkit-scrollbar-thumb { background: var(--border); }
-
-    .log-line {
-      font-family: var(--mono);
-      font-size: 0.64rem;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    .log-line.ok  { color: var(--ok); }
-    .log-line.err { color: var(--warn); }
-    .log-line.info { color: var(--accent); }
-
     .btn-camera-switch {
       display: none;
       position: absolute;
@@ -544,14 +407,7 @@
         flex: 1;
       }
 
-      .overlay-metrics {
-        bottom: 8px;
-        left: 8px;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-
-      .metric-chip { font-size: 0.6rem; padding: 3px 6px; }
+      .overlay-metrics { display: none !important; }
 
       .sidebar {
         max-height: min(42vh, 320px);
@@ -588,11 +444,6 @@
         padding: 10px 14px;
       }
 
-      .voice-panel .btn-voice { display: none; }
-      .voice-panel .recording-indicator { display: none !important; }
-
-      .voice-hint::before { content: 'Toque e segure o botão 🎙 abaixo · '; }
-
       .detections-list {
         flex: none;
         max-height: 120px;
@@ -606,13 +457,11 @@
 
       .empty-state { padding: 16px 0; font-size: 0.75rem; }
     }
-
-    @media (min-width: 769px) {
-      .voice-fab, .voice-fab-label, .mobile-recording-bar { display: none !important; }
-    }
   </style>
 </head>
 <body>
+
+<div id="a11y-status" class="a11y-status" role="status" aria-live="polite">Iniciando assistenteâ€¦</div>
 
 <header>
   <div class="logo">
@@ -621,7 +470,7 @@
       <circle cx="14" cy="14" r="3.5" fill="#00e5ff"/>
       <circle cx="15.2" cy="12.8" r="1" fill="#000"/>
     </svg>
-    <span>Occhio<span class="logo-accent"> Vision</span></span>
+    <span>Specula<span class="logo-accent"> Vision</span></span>
   </div>
 
   <div class="status-bar">
@@ -632,7 +481,7 @@
     </div>
     <div class="pill" id="cam-pill">
       <span class="dot"></span>
-      <span class="pill-text-long" id="cam-label">Câmera inativa</span>
+      <span class="pill-text-long" id="cam-label">CÃ¢mera inativa</span>
       <span class="pill-text-short">Cam</span>
     </div>
   </div>
@@ -647,31 +496,22 @@
         <circle cx="32" cy="34" r="4" fill="#64748b"/>
         <rect x="22" y="10" width="20" height="8" rx="2" stroke="#64748b" stroke-width="2"/>
       </svg>
-      <span>Clique em "Iniciar câmera" para começar</span>
+      <span>Aguardando permissÃ£o da cÃ¢mera e microfoneâ€¦</span>
     </div>
 
     <video id="video" autoplay muted playsinline></video>
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" aria-hidden="true"></canvas>
 
-    <div class="overlay-metrics" id="metrics" style="display:none">
-      <div class="metric-chip">FPS <span id="fps-val">—</span></div>
-      <div class="metric-chip">Latência <span id="ms-val">—</span> ms</div>
-      <div class="metric-chip">Resolução <span id="res-val">—</span></div>
-    </div>
-
-    <button class="voice-fab" id="btn-perguntar-fab" aria-label="Segure para perguntar por voz">🎙</button>
-    <span class="voice-fab-label" id="voice-fab-label">Segure para falar</span>
-    <button class="btn-camera-switch" id="btn-switch-cam" aria-label="Alternar câmera" title="Câmera frontal">🤳</button>
-  </div>
-
-  <div class="mobile-recording-bar" id="mobile-recording-bar">
-    <span class="rec-dot"></span>
-    <span>Gravando… solte para enviar</span>
+    <button class="btn-camera-switch" id="btn-switch-cam" aria-label="Alternar cÃ¢mera" title="CÃ¢mera frontal">ðŸ¤³</button>
   </div>
 
   <aside class="sidebar">
+    <div class="permission-error" id="permission-error" role="alert">
+      Por favor, permita o acesso Ã  cÃ¢mera e microfone para usar o assistente.
+    </div>
+
     <div class="sidebar-header">
-      <div class="sidebar-title">Detecções</div>
+      <div class="sidebar-title">DetecÃ§Ãµes</div>
       <div class="sidebar-count">
         <span id="total-count">0</span>
         <small> objetos</small>
@@ -679,43 +519,26 @@
     </div>
 
     <div class="controls">
-      <button class="btn btn-primary" id="btn-start">▶ Iniciar câmera</button>
-      <button class="btn btn-danger" id="btn-stop" disabled>■ Parar</button>
-      <button class="btn btn-secondary" id="btn-switch-cam-sidebar" style="display:none">🤳 Câmera frontal</button>
-
-      <div>
-        <div class="slider-row">
-          <span>Confiança mínima</span>
-          <span id="thresh-label">45%</span>
-        </div>
-        <input type="range" id="thresh-slider" min="10" max="90" value="45" step="5" />
-      </div>
+      <button class="btn btn-danger" id="btn-stop" disabled>â–  Parar assistente</button>
+      <button class="btn btn-secondary" id="btn-switch-cam-sidebar" style="display:none">ðŸ¤³ CÃ¢mera frontal</button>
     </div>
 
-    <div class="voice-panel" id="voice-panel">
-      <button class="btn btn-voice" id="btn-perguntar">🎙 Perguntar</button>
-      <div class="recording-indicator" id="recording-indicator">
-        <span class="rec-dot"></span>
-        <span>Gravando… solte para enviar</span>
-      </div>
+    <div class="voice-panel active" id="voice-panel">
       <div class="voice-box">
         <div class="voice-box-label">Sua pergunta</div>
-        <div class="voice-box-text empty" id="transcricao-text">—</div>
+        <div class="voice-box-text empty" id="transcricao-text">â€”</div>
       </div>
       <div class="voice-box">
         <div class="voice-box-label">Resposta</div>
-        <div class="voice-box-text empty" id="resposta-text">—</div>
+        <div class="voice-box-text empty" id="resposta-text">â€”</div>
       </div>
-      <div class="voice-hint">Segure Espaço ou o botão para gravar</div>
     </div>
 
     <div class="detections-list" id="det-list">
       <div class="empty-state">
-        Nenhuma detecção ainda.<br/>Inicie a câmera para começar.
+        Nenhuma detecÃ§Ã£o ainda.<br/>O assistente iniciarÃ¡ automaticamente.
       </div>
     </div>
-
-    <div class="log-area" id="log-area"></div>
   </aside>
 </main>
 
@@ -723,14 +546,18 @@
 const WS_PROTO = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const WS_URL = `${WS_PROTO}//${location.host}/stream`;
 const TARGET_SEND_FPS = 12;
-const MIN_GRAVACAO_MS = 800;
 const LERP_FATOR = 0.55;
+const DETECTION_CONFIDENCE = 0.65;
+const VAD_RMS_THRESHOLD = 0.015;
+const VAD_SILENCE_MS = 1200;
+const VAD_POLL_MS = 50;
+const MIN_GRAVACAO_MS = 800;
 
 const NOMES_PT = {
   person: 'pessoa', chair: 'cadeira', table: 'mesa', laptop: 'computador',
-  tv: 'televisão', 'cell phone': 'celular', book: 'livro', bottle: 'garrafa',
+  tv: 'televisÃ£o', 'cell phone': 'celular', book: 'livro', bottle: 'garrafa',
   cup: 'copo', car: 'carro', bicycle: 'bicicleta', dog: 'cachorro', cat: 'gato',
-  keyboard: 'teclado', mouse: 'mouse', couch: 'sofá', bed: 'cama',
+  keyboard: 'teclado', mouse: 'mouse', couch: 'sofÃ¡', bed: 'cama',
   'dining table': 'mesa', backpack: 'mochila', handbag: 'bolsa',
 };
 
@@ -786,108 +613,93 @@ let sendLoop = null;
 let lastDeteccoesRaw = [];
 let lastDeteccoes = [];
 let lastRostos = [];
-let frameCount = 0;
-let fpsTs = performance.now();
-let fpsDisplay = 0;
-let threshold = 0.45;
 let wsReady = false;
-let mediaRecorder = null;
-let audioChunks = [];
-let audioStream = null;
-let gravando = false;
-let processandoVoz = false;
-let ultimaRespostaVozTs = 0;
 let aguardandoFrame = false;
 let frameTimeout = null;
-let gravacaoInicio = 0;
 let detAlvo = [];
 let rostAlvo = [];
 let detRender = [];
 let rostRender = [];
 
+let audioContext = null;
+let analyser = null;
+let vadInterval = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let gravando = false;
+let falaDetectada = false;
+let silencioInicio = null;
+let gravacaoInicio = 0;
+
+let vadPausado = false;
+let processandoVoz = false;
+let servidorVozOcupada = false;
+let audioQueue = [];
+let audioPlaying = false;
+
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const placeholder = document.getElementById('placeholder');
-const metrics = document.getElementById('metrics');
 const detList = document.getElementById('det-list');
 const totalCount = document.getElementById('total-count');
-const fpsVal = document.getElementById('fps-val');
-const msVal = document.getElementById('ms-val');
-const resVal = document.getElementById('res-val');
-const btnStart = document.getElementById('btn-start');
 const btnStop = document.getElementById('btn-stop');
 const btnSwitchCam = document.getElementById('btn-switch-cam');
 const btnSwitchCamSidebar = document.getElementById('btn-switch-cam-sidebar');
-const threshSlider = document.getElementById('thresh-slider');
-const threshLabel = document.getElementById('thresh-label');
-const logArea = document.getElementById('log-area');
 const wsPill = document.getElementById('ws-pill');
 const wsLabel = document.getElementById('ws-label');
 const camPill = document.getElementById('cam-pill');
 const camLabel = document.getElementById('cam-label');
-const voicePanel = document.getElementById('voice-panel');
-const btnPerguntar = document.getElementById('btn-perguntar');
-const btnPerguntarFab = document.getElementById('btn-perguntar-fab');
-const voiceFabLabel = document.getElementById('voice-fab-label');
-const mobileRecordingBar = document.getElementById('mobile-recording-bar');
-const recordingIndicator = document.getElementById('recording-indicator');
 const transcricaoText = document.getElementById('transcricao-text');
 const respostaText = document.getElementById('resposta-text');
+const a11yStatus = document.getElementById('a11y-status');
+const permissionError = document.getElementById('permission-error');
 
-function setVozUI(ativo) {
-  voicePanel.classList.toggle('active', ativo);
-  btnPerguntarFab.classList.toggle('visible', ativo);
-  voiceFabLabel.classList.toggle('visible', ativo);
+function setA11yStatus(texto) {
+  a11yStatus.textContent = texto;
 }
 
-function setGravandoUI(gravandoAtivo) {
-  btnPerguntar.classList.toggle('recording', gravandoAtivo);
-  btnPerguntarFab.classList.toggle('recording', gravandoAtivo);
-  voiceFabLabel.classList.toggle('recording', gravandoAtivo);
-  voiceFabLabel.textContent = gravandoAtivo ? 'Solte para enviar' : 'Segure para falar';
-  recordingIndicator.classList.toggle('active', gravandoAtivo);
-  mobileRecordingBar.classList.toggle('active', gravandoAtivo);
+function vadPodeMonitorar() {
+  return stream && wsReady && !vadPausado && !processandoVoz && !servidorVozOcupada && !audioPlaying;
 }
 
-function setVozProcessando(ativo) {
-  btnPerguntar.disabled = ativo;
-  btnPerguntarFab.disabled = ativo;
+function pausarVad() {
+  vadPausado = true;
 }
 
-function log(msg, tipo = 'info') {
-  const el = document.createElement('div');
-  el.className = `log-line ${tipo}`;
-  const ts = new Date().toLocaleTimeString('pt-BR');
-  el.textContent = `[${ts}] ${msg}`;
-  logArea.appendChild(el);
-  logArea.scrollTop = logArea.scrollHeight;
-  while (logArea.children.length > 40) logArea.removeChild(logArea.firstChild);
+function tentarRetomarVad() {
+  if (!processandoVoz && !servidorVozOcupada && !audioPlaying && stream && wsReady) {
+    vadPausado = false;
+    setA11yStatus('Ouvindo...');
+  }
 }
 
 function conectarWS() {
   if (ws && ws.readyState < 2) return;
 
-  log(`Conectando a ${WS_URL}…`);
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
     wsReady = true;
     wsPill.classList.add('live');
-    wsLabel.textContent = 'WebSocket conectado';
-    log('WebSocket conectado', 'ok');
+    wsLabel.textContent = 'Conectado';
+    if (stream) tentarRetomarVad();
   };
 
   ws.onmessage = (evt) => {
     try {
       const data = JSON.parse(evt.data);
-      if (data.erro && data.tipo !== 'resposta_voz') { log(data.erro, 'err'); return; }
+      if (data.erro && data.tipo !== 'resposta_voz') return;
 
       if (data.tipo === 'resposta_voz') {
+        if (data.voz_ocupada === true && !data.resposta && !data.transcricao && !data.erro) {
+          servidorVozOcupada = true;
+          pausarVad();
+          return;
+        }
+
         processandoVoz = false;
-        ultimaRespostaVozTs = Date.now();
-        setVozProcessando(false);
-        if (data.erro) log(data.erro, 'err');
+        servidorVozOcupada = data.voz_ocupada === true;
 
         if (data.transcricao) {
           transcricaoText.textContent = data.transcricao;
@@ -896,64 +708,63 @@ function conectarWS() {
         if (data.resposta) {
           respostaText.textContent = data.resposta;
           respostaText.classList.remove('empty');
-          log('Resposta recebida', 'ok');
         }
         if (data.audio_b64) {
-          tocarAudio(data.audio_b64);
-        } else if (data.resposta) {
-          const msg = data.audio_erro
-            ? `Áudio indisponível: ${data.audio_erro}`
-            : 'Áudio indisponível — resposta exibida em texto';
-          log(msg, 'info');
-        }
-        if (data.cadastro_ativo) {
-          log('Cadastro em andamento — responda às perguntas por voz', 'info');
+          enfileirarAudio(data.audio_b64);
+        } else {
+          tentarRetomarVad();
         }
         return;
       }
 
       if (data.tipo === 'alerta_pessoa') {
-        log(data.mensagem || `Reconheci ${data.nome}`, 'ok');
-        const vozRecente = Date.now() - ultimaRespostaVozTs < 12000;
-        if (data.audio_b64 && !processandoVoz && !gravando && !vozRecente) {
-          tocarAudio(data.audio_b64);
+        if (data.mensagem) {
+          respostaText.textContent = data.mensagem;
+          respostaText.classList.remove('empty');
+        }
+        if (data.audio_b64 && !processandoVoz) {
+          if (data.voz_ocupada) servidorVozOcupada = true;
+          enfileirarAudio(data.audio_b64);
         }
         return;
       }
 
       lastDeteccoesRaw = data.deteccoes || [];
       lastRostos = data.rostos || [];
-      lastDeteccoes = lastDeteccoesRaw.filter(d => d.confianca >= threshold);
+      lastDeteccoes = lastDeteccoesRaw.filter(d => d.confianca >= DETECTION_CONFIDENCE);
       detAlvo = lastDeteccoes;
       rostAlvo = lastRostos;
       aguardandoFrame = false;
       if (frameTimeout) { clearTimeout(frameTimeout); frameTimeout = null; }
-      msVal.textContent = data.ms ?? '—';
-      resVal.textContent = data.resolucao ?? '—';
       totalCount.textContent = lastDeteccoes.length;
       atualizarListaDeteccoes(lastDeteccoes);
     } catch (e) {
-      log('Resposta inválida do servidor', 'err');
+      /* resposta invÃ¡lida */
     }
   };
 
-  ws.onerror = () => log('Erro no WebSocket', 'err');
+  ws.onerror = () => {
+    wsPill.classList.remove('live');
+    wsLabel.textContent = 'Erro de conexÃ£o';
+  };
 
-  ws.onclose = (evt) => {
+  ws.onclose = () => {
     wsReady = false;
     wsPill.classList.remove('live');
-    wsLabel.textContent = 'WebSocket desconectado';
-    const motivo = evt.code ? ` (código ${evt.code}${evt.reason ? ': ' + evt.reason : ''})` : '';
-    log(`WebSocket fechado${motivo}`, 'err');
+    wsLabel.textContent = 'Desconectado';
+    pausarVad();
     if (stream) setTimeout(conectarWS, 2000);
   };
 }
 
-async function iniciarCamera() {
+async function iniciarAssistente() {
+  permissionError.classList.remove('visible');
+  setA11yStatus('Solicitando acesso Ã  cÃ¢mera e microfoneâ€¦');
+
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: { ideal: facingMode } },
-      audio: false
+      audio: true,
     });
 
     video.srcObject = stream;
@@ -962,51 +773,61 @@ async function iniciarCamera() {
     camPill.classList.add('live');
     atualizarLabelCamera();
     placeholder.style.display = 'none';
-    metrics.style.display = 'flex';
-    btnStart.disabled = true;
     btnStop.disabled = false;
     btnSwitchCam.classList.add('visible');
     btnSwitchCamSidebar.style.display = 'block';
-    setVozUI(true);
 
-    log('Câmera iniciada', 'ok');
     conectarWS();
     iniciarRenderLoop();
     iniciarEnvioFrames();
+    iniciarVAD();
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+    setA11yStatus('Ouvindo...');
   } catch (e) {
-    log(`Câmera negada: ${e.message}`, 'err');
-    alert(`Não foi possível acessar a câmera.\n${e.message}`);
+    permissionError.classList.add('visible');
+    setA11yStatus('Por favor, permita o acesso Ã  cÃ¢mera e microfone para usar o assistente.');
+    placeholder.style.display = 'flex';
+    placeholder.querySelector('span').textContent =
+      'Por favor, permita o acesso Ã  cÃ¢mera e microfone para usar o assistente.';
   }
 }
 
 function atualizarLabelCamera() {
   const frontal = facingMode === 'user';
-  const label = frontal ? 'Câmera frontal' : 'Câmera traseira';
+  const label = frontal ? 'CÃ¢mera frontal' : 'CÃ¢mera traseira';
   camLabel.textContent = label;
-  btnSwitchCam.title = frontal ? 'Usar câmera traseira' : 'Usar câmera frontal';
+  btnSwitchCam.title = frontal ? 'Usar cÃ¢mera traseira' : 'Usar cÃ¢mera frontal';
   btnSwitchCam.setAttribute('aria-label', btnSwitchCam.title);
-  btnSwitchCamSidebar.textContent = frontal ? '📷 Câmera traseira' : '🤳 Câmera frontal';
+  btnSwitchCamSidebar.textContent = frontal ? 'ðŸ“· CÃ¢mera traseira' : 'ðŸ¤³ CÃ¢mera frontal';
 }
 
 async function trocarCamera() {
   if (!stream) return;
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
-  pararGravacao(true);
+  cancelarGravacaoVAD();
+  pararVAD();
   if (sendLoop) { clearInterval(sendLoop); sendLoop = null; }
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   stream.getTracks().forEach(t => t.stop());
   stream = null;
-  log(`Alternando para câmera ${facingMode === 'user' ? 'frontal' : 'traseira'}…`, 'info');
-  await iniciarCamera();
+  await iniciarAssistente();
 }
 
-function pararCamera() {
-  pararGravacao(true);
-  if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+function pararAssistente() {
+  cancelarGravacaoVAD();
+  pararVAD();
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   if (sendLoop) { clearInterval(sendLoop); sendLoop = null; }
   if (ws) { ws.close(); ws = null; }
+
+  audioQueue = [];
+  audioPlaying = false;
+  processandoVoz = false;
+  servidorVozOcupada = false;
+  vadPausado = true;
 
   video.srcObject = null;
   lastDeteccoesRaw = [];
@@ -1020,20 +841,16 @@ function pararCamera() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   camPill.classList.remove('live');
-  camLabel.textContent = 'Câmera inativa';
+  camLabel.textContent = 'Inativo';
   btnSwitchCam.classList.remove('visible');
   btnSwitchCamSidebar.style.display = 'none';
   facingMode = 'environment';
   placeholder.style.display = 'flex';
-  metrics.style.display = 'none';
-  btnStart.disabled = false;
+  placeholder.querySelector('span').textContent = 'Assistente parado.';
   btnStop.disabled = true;
-  setVozUI(false);
-  setGravandoUI(false);
-  setVozProcessando(false);
   totalCount.textContent = '0';
-  detList.innerHTML = '<div class="empty-state">Câmera parada.</div>';
-  log('Câmera parada', 'info');
+  detList.innerHTML = '<div class="empty-state">Assistente parado.</div>';
+  setA11yStatus('Assistente parado.');
 }
 
 function iniciarRenderLoop() {
@@ -1059,12 +876,10 @@ function iniciarRenderLoop() {
       const w = det.w * canvas.width;
       const h = det.h * canvas.height;
       const cor = classColor(det.nome);
-
       ctx.strokeStyle = cor;
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
-
-      const label = `${nomePT(det.nome)}  ${Math.round(det.confianca * 100)}%`;
+      const label = nomePT(det.nome);
       desenharRotulo(ctx, label, x, Math.max(y, 20), cor, true);
     }
 
@@ -1077,20 +892,10 @@ function iniciarRenderLoop() {
       ctx.strokeStyle = cor;
       ctx.lineWidth = 3;
       ctx.strokeRect(x, y, w, h);
-      const label = face.conhecido
-        ? face.nome
-        : 'Rosto desconhecido';
+      const label = face.conhecido ? face.nome : 'Rosto desconhecido';
       desenharRotulo(ctx, label, x, y + h + 2, cor, false);
     }
 
-    frameCount++;
-    const now = performance.now();
-    if (now - fpsTs >= 1000) {
-      fpsDisplay = frameCount;
-      frameCount = 0;
-      fpsTs = now;
-    }
-    fpsVal.textContent = fpsDisplay;
     rafId = requestAnimationFrame(render);
   }
   rafId = requestAnimationFrame(render);
@@ -1117,13 +922,13 @@ function iniciarEnvioFrames() {
       aguardandoFrame = false;
       frameTimeout = null;
     }, 2500);
-    ws.send(JSON.stringify({ frame: b64, threshold }));
+    ws.send(JSON.stringify({ frame: b64 }));
   }, intervalo);
 }
 
 function atualizarListaDeteccoes(dets) {
   if (dets.length === 0) {
-    detList.innerHTML = '<div class="empty-state">Nenhum objeto detectado<br/>neste frame.</div>';
+    detList.innerHTML = '<div class="empty-state">Nenhum objeto detectado<br/>neste momento.</div>';
     return;
   }
 
@@ -1137,104 +942,159 @@ function atualizarListaDeteccoes(dets) {
   const sorted = Object.values(mapa).sort((a, b) => b.conf - a.conf);
   detList.innerHTML = sorted.map(d => {
     const cor = classColor(d.nome);
-    const pct = Math.round(d.conf * 100);
-    const qtd = d.qtd > 1 ? ` ×${d.qtd}` : '';
+    const qtd = d.qtd > 1 ? ` Ã—${d.qtd}` : '';
     return `
       <div class="det-item">
         <div class="det-color" style="background:${cor}"></div>
         <div style="flex:1">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <span class="det-name">${nomePT(d.nome)}${qtd}</span>
-            <span class="det-conf">${pct}%</span>
-          </div>
-          <div class="det-bar-wrap">
-            <div class="det-bar" style="width:${pct}%;background:${cor}"></div>
           </div>
         </div>
       </div>`;
   }).join('');
 }
 
-async function iniciarGravacao() {
-  if (gravando || processandoVoz || !stream) return;
-  try {
-    if (!audioStream) {
-      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+function iniciarVAD() {
+  if (!stream) return;
+
+  const audioTracks = stream.getAudioTracks();
+  if (!audioTracks.length) return;
+
+  const audioStream = new MediaStream(audioTracks);
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioContext.createMediaStreamSource(audioStream);
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
+  source.connect(analyser);
+
+  const dataArray = new Float32Array(analyser.fftSize);
+
+  vadInterval = setInterval(() => {
+    if (!analyser) return;
+
+    if (!vadPodeMonitorar()) {
+      if (!gravando) {
+        falaDetectada = false;
+        silencioInicio = null;
+      }
+      return;
     }
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
-    mediaRecorder = new MediaRecorder(audioStream, { mimeType });
-    audioChunks = [];
-    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-    mediaRecorder.onstop = enviarAudio;
-    mediaRecorder.start(250);
-    gravacaoInicio = Date.now();
-    gravando = true;
-    setGravandoUI(true);
-    log('Gravando pergunta…', 'info');
-  } catch (e) {
-    log(`Microfone negado: ${e.message}`, 'err');
-  }
+
+    analyser.getFloatTimeDomainData(dataArray);
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      sum += dataArray[i] * dataArray[i];
+    }
+    const rms = Math.sqrt(sum / dataArray.length);
+
+    if (rms > VAD_RMS_THRESHOLD) {
+      if (!gravando) {
+        iniciarGravacaoVAD();
+      }
+      falaDetectada = true;
+      silencioInicio = null;
+    } else if (gravando && falaDetectada) {
+      if (!silencioInicio) {
+        silencioInicio = Date.now();
+      } else if (Date.now() - silencioInicio >= VAD_SILENCE_MS) {
+        finalizarGravacaoVAD();
+        falaDetectada = false;
+        silencioInicio = null;
+      }
+    }
+  }, VAD_POLL_MS);
 }
 
-function pararGravacao(cancelar = false) {
+function pararVAD() {
+  if (vadInterval) {
+    clearInterval(vadInterval);
+    vadInterval = null;
+  }
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+  analyser = null;
+}
+
+function iniciarGravacaoVAD() {
+  if (gravando || !stream) return;
+
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : 'audio/webm';
+
+  const audioTracks = stream.getAudioTracks();
+  if (!audioTracks.length) return;
+
+  const audioOnly = new MediaStream(audioTracks);
+  mediaRecorder = new MediaRecorder(audioOnly, { mimeType });
+  audioChunks = [];
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
+  mediaRecorder.onstop = enviarAudio;
+  mediaRecorder.start(100);
+  gravacaoInicio = Date.now();
+  gravando = true;
+}
+
+function cancelarGravacaoVAD() {
+  if (!gravando || !mediaRecorder) return;
+  mediaRecorder.onstop = null;
+  if (mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  gravando = false;
+  falaDetectada = false;
+  silencioInicio = null;
+  audioChunks = [];
+}
+
+function finalizarGravacaoVAD() {
   if (!gravando || !mediaRecorder) return;
 
-  const finalizar = () => {
+  const elapsed = Date.now() - gravacaoInicio;
+  const parar = () => {
     gravando = false;
-    setGravandoUI(false);
+    falaDetectada = false;
+    silencioInicio = null;
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       mediaRecorder.requestData();
       mediaRecorder.stop();
     }
   };
 
-  if (cancelar) {
-    mediaRecorder.onstop = null;
-    finalizar();
-    audioChunks = [];
-    return;
-  }
-
-  const elapsed = Date.now() - gravacaoInicio;
   if (elapsed < MIN_GRAVACAO_MS) {
-    log('Segure um pouco mais…', 'info');
-    setTimeout(finalizar, MIN_GRAVACAO_MS - elapsed);
+    setTimeout(parar, MIN_GRAVACAO_MS - elapsed);
     return;
   }
-  finalizar();
+  parar();
 }
 
 function enviarAudio() {
-  if (audioChunks.length === 0) {
-    processandoVoz = false;
-    setVozProcessando(false);
-    log('Nenhum áudio capturado. Tente novamente.', 'err');
-    return;
-  }
+  if (audioChunks.length === 0) return;
 
   const blob = new Blob(audioChunks, { type: 'audio/webm' });
   audioChunks = [];
 
   if (blob.size < 1200) {
-    processandoVoz = false;
-    setVozProcessando(false);
-    log('Gravação muito curta. Segure o botão por pelo menos 1 segundo.', 'err');
+    tentarRetomarVad();
     return;
   }
   if (!wsReady || !ws || ws.readyState !== WebSocket.OPEN) {
     processandoVoz = false;
-    setVozProcessando(false);
-    log('WebSocket desconectado — não foi possível enviar áudio', 'err');
+    tentarRetomarVad();
     return;
   }
 
   processandoVoz = true;
-  setVozProcessando(true);
-  respostaText.textContent = 'Processando…';
+  servidorVozOcupada = true;
+  pausarVad();
+  setA11yStatus('Processando...');
+  respostaText.textContent = 'Processandoâ€¦';
   respostaText.classList.add('empty');
-  log('Enviando pergunta de voz…', 'info');
 
   const reader = new FileReader();
   reader.onload = () => {
@@ -1244,53 +1104,53 @@ function enviarAudio() {
   reader.readAsDataURL(blob);
 }
 
-function tocarAudio(b64) {
+function enfileirarAudio(b64) {
+  audioQueue.push(b64);
+  if (!audioPlaying) reproduzirProximoAudio();
+}
+
+function reproduzirProximoAudio() {
+  if (audioQueue.length === 0) {
+    audioPlaying = false;
+    servidorVozOcupada = false;
+    tentarRetomarVad();
+    return;
+  }
+
+  audioPlaying = true;
+  pausarVad();
+  setA11yStatus('Respondendo...');
+
+  const b64 = audioQueue.shift();
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   const blob = new Blob([bytes], { type: 'audio/mp3' });
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
-  audio.play().catch(e => log(`Erro ao reproduzir áudio: ${e.message}`, 'err'));
-  audio.onended = () => URL.revokeObjectURL(url);
+
+  audio.onended = () => {
+    URL.revokeObjectURL(url);
+    reproduzirProximoAudio();
+  };
+  audio.onerror = () => {
+    URL.revokeObjectURL(url);
+    reproduzirProximoAudio();
+  };
+
+  audio.play().catch(() => {
+    URL.revokeObjectURL(url);
+    reproduzirProximoAudio();
+  });
 }
 
-btnStart.addEventListener('click', iniciarCamera);
-btnStop.addEventListener('click', pararCamera);
+btnStop.addEventListener('click', pararAssistente);
 btnSwitchCam.addEventListener('click', trocarCamera);
 btnSwitchCamSidebar.addEventListener('click', trocarCamera);
+window.addEventListener('beforeunload', pararAssistente);
 
-function bindVoz(el) {
-  el.addEventListener('mousedown', (e) => { e.preventDefault(); iniciarGravacao(); });
-  el.addEventListener('mouseup', () => pararGravacao());
-  el.addEventListener('mouseleave', () => { if (gravando) pararGravacao(); });
-  el.addEventListener('touchstart', (e) => { e.preventDefault(); iniciarGravacao(); }, { passive: false });
-  el.addEventListener('touchend', (e) => { e.preventDefault(); pararGravacao(); });
-  el.addEventListener('touchcancel', (e) => { e.preventDefault(); pararGravacao(); });
-}
-
-bindVoz(btnPerguntar);
-bindVoz(btnPerguntarFab);
-
-document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && stream && !e.repeat) {
-    e.preventDefault();
-    iniciarGravacao();
-  }
+document.addEventListener('DOMContentLoaded', () => {
+  conectarWS();
+  iniciarAssistente();
 });
-document.addEventListener('keyup', (e) => {
-  if (e.code === 'Space' && stream) {
-    e.preventDefault();
-    pararGravacao();
-  }
-});
-threshSlider.addEventListener('input', () => {
-  threshold = threshSlider.value / 100;
-  threshLabel.textContent = `${threshSlider.value}%`;
-  lastDeteccoes = lastDeteccoesRaw.filter(d => d.confianca >= threshold);
-  detAlvo = lastDeteccoes;
-  totalCount.textContent = lastDeteccoes.length;
-  atualizarListaDeteccoes(lastDeteccoes);
-});
-window.addEventListener('beforeunload', pararCamera);
 </script>
 </body>
 </html>

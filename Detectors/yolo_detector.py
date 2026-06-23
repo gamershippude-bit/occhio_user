@@ -147,7 +147,7 @@ class YOLODetector:
             logger.error(f"❌ Erro no pré-processamento: {e}")
             return frame
     
-    def detectar_com_bbox(self, frame: np.ndarray, confidence_threshold: float = 0.5) -> List[Dict[str, Any]]:
+    def detectar_com_bbox(self, frame: np.ndarray, confidence_threshold: float = 0.65) -> List[Dict[str, Any]]:
         """
         Detecta objetos retornando bounding boxes.
         
@@ -292,7 +292,6 @@ class YOLODetector:
             
             # 1. FILTRO: Confiança mínima por classe
             class_min_confidences = {
-                # Classes com muitos falsos positivos (aumentar muito)
                 'sports ball': 0.75,
                 'tie': 0.70,
                 'handbag': 0.65,
@@ -305,27 +304,25 @@ class YOLODetector:
                 'airplane': 0.70,
                 'toothbrush': 0.65,
                 'hair drier': 0.65,
-                'traffic light': 0.60,
-                'stop sign': 0.60,
-                
-                # Classes comuns (threshold moderado)
-                'person': 0.40,
-                'car': 0.45,
-                'chair': 0.45,
-                'bottle': 0.55,
-                'cup': 0.55,
-                'book': 0.45,
-                'laptop': 0.50,
-                'cell phone': 0.60,
-                'tv': 0.55,
-                'keyboard': 0.50,
-                'mouse': 0.50,
-                'dining table': 0.45,
-                'couch': 0.45,
-                'potted plant': 0.50,
+                'traffic light': 0.65,
+                'stop sign': 0.65,
+                'person': 0.65,
+                'car': 0.65,
+                'chair': 0.65,
+                'bottle': 0.65,
+                'cup': 0.65,
+                'book': 0.65,
+                'laptop': 0.65,
+                'cell phone': 0.65,
+                'tv': 0.65,
+                'keyboard': 0.65,
+                'mouse': 0.65,
+                'dining table': 0.65,
+                'couch': 0.65,
+                'potted plant': 0.65,
             }
             
-            min_conf = class_min_confidences.get(class_name, 0.5)
+            min_conf = class_min_confidences.get(class_name, 0.65)
             if confidence < min_conf:
                 logger.debug(f"⏩ Filtro confiança: {class_name} ({confidence:.3f} < {min_conf})")
                 return False
