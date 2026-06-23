@@ -643,13 +643,6 @@ let toneCtx = null;
 let keywordRecognition = null;
 let interruptionCooldownUntil = 0;
 
-const FRASES_PROCESSAMENTO = [
-  'Entendido, um momento.',
-  'Certo, processando.',
-  'Deixa eu ver.',
-  'Ok.',
-];
-
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
@@ -715,7 +708,7 @@ function playInterruptionBeep() {
 
 function speakProcessing() {
   if (!window.speechSynthesis) return;
-  const frase = FRASES_PROCESSAMENTO[Math.floor(Math.random() * FRASES_PROCESSAMENTO.length)];
+  const frase = 'Processando a resposta.';
   const utter = new SpeechSynthesisUtterance(frase);
   utter.lang = 'pt-BR';
   utter.rate = 1.1;
@@ -778,7 +771,7 @@ function iniciarReconhecimentoPalavraChave() {
     for (let i = event.resultIndex; i < event.results.length; i++) {
       transcript += event.results[i][0].transcript;
     }
-    if (transcript.toLowerCase().includes('specula')) {
+    if (transcript.toLowerCase().includes('ok')) {
       triggerInterruption();
     }
   };
